@@ -35,7 +35,7 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the full hardware and software requir
 - SudoVDA virtual display driver (one virtual display per seat)
 - HidHide (controller isolation)
 - ViGEmBus (virtual controller driver)
-- RDPWrap (multi-session RDP on Windows Home/Pro)
+- A multi-session patch for Terminal Services — [TermWrap](https://github.com/llccd/TermWrap) (preferred) or RDPWrap
 - PowerShell 7+ (`winget install Microsoft.PowerShell`)
 
 ---
@@ -73,7 +73,7 @@ This script automatically downloads and installs everything:
 |----------|---------|
 | ViGEmBus | Virtual Xbox controller driver |
 | HidHide | Hides physical controllers from the host |
-| RDPWrap + rdpwrap.ini | Enables concurrent RDP sessions on Windows Home/Pro |
+| TermWrap *or* RDPWrap + rdpwrap.ini | Enables concurrent RDP sessions on Windows client editions |
 | Apollo | Sunshine fork with multi-instance streaming support |
 | SudoVDA | Virtual display driver (one display per seat) |
 | .NET 9 SDK | Required to build and run MultiSeat.Service |
@@ -305,7 +305,7 @@ Controller isolation is handled by HidHide, not the InputHook DLL. Ensure HidHid
 `EnableKeyboardMouseIsolation` is off by default, and turning it on currently does nothing: the low-level hooks are installed from the service process in Session 0, where `GetForegroundWindow()` returns NULL, so the filter always passes the event through. There is also no cross-session bleed to prevent in the RDP-loopback design — physical input goes to the console session, and Moonlight input is injected inside the seat session. Making this meaningful requires re-architecting the hook to run inside the seat session; a missing `MultiSeatInputHook.dll` is therefore harmless.
 
 **RDPWrap shows "Not supported" after a Windows update**
-Re-run `prerequisites\install-prerequisites.ps1` — it will fetch the latest `rdpwrap.ini` automatically.
+RDP Wrapper looks its patch offsets up in `rdpwrap.ini`, keyed by the exact `termsrv.dll` build, so every cumulative update that ships a new one breaks it until a matching entry is published. Re-run `prerequisites\install-prerequisites.ps1` to fetch the latest ini — or switch to [TermWrap](https://github.com/llccd/TermWrap), which disassembles `termsrv.dll` at load and resolves the offsets itself, so it needs no ini and survives updates. MultiSeat detects either: it checks that TermService's `ServiceDll` is not the stock `termsrv.dll`, not which product installed it.
 
 **No sound in a seat**
 Turn **"Play audio on host PC" ON** in the Moonlight client. Seats use per-session audio, so the "host" of a redirected session is the seat's own session — this is the opposite of the old virtual-cable setup, where it had to be off. Seats have no microphone (a session that keeps its own audio cannot reach the host's mic driver).

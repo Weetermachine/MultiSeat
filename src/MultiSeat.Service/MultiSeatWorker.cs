@@ -82,11 +82,24 @@ public sealed class MultiSeatWorker : BackgroundService
         SetDwmFrameInterval();
 
         // ── Step 1: Verify multi-session is available ────────────────
-        if (!_rdpWrapper.EnsureMultiSession())
+        // Wait for TermService first. The patch is a shim TermService loads, so before it is
+        // Running there is nothing to observe — evaluating early produced the contradictory
+        // "patch not detected" + "TermService is not running" pair in every cold-boot log,
+        // on a host where the patch was in fact present.
+        var termServiceTimeout = TimeSpan.FromSeconds(30);
+        if (!await _rdpWrapper.WaitForTermServiceAsync(termServiceTimeout, stoppingToken))
+        {
+            // Deliberately NOT "patch not detected" — that is a different and misleading claim.
+            _logger.LogWarning(
+                "TermService did not reach Running within {Seconds}s; multi-session patch state " +
+                "unknown. Seat provisioning will fail until Terminal Services is running.",
+                (int)termServiceTimeout.TotalSeconds);
+        }
+        else if (!_rdpWrapper.EnsureMultiSession())
         {
             _logger.LogError(
-                "RDP Wrapper multi-session patch not detected. " +
-                "Concurrent sessions will not work. Install RDP Wrapper Library and restart.");
+                "Multi-session patch not detected. Concurrent sessions will not work. " +
+                "Install TermWrap (https://github.com/llccd/TermWrap) or RDP Wrapper, then restart.");
         }
 
         // ── Step 2: Start input subsystems ─────────────────────────────

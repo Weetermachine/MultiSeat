@@ -146,7 +146,7 @@ Apps launch into the seat session via `ProcessInjector.LaunchInSessionAsync`. Th
 ## Known Constraints
 
 - NVIDIA consumer GPUs: 3–5 concurrent NVENC sessions max.
-- RDPWrap breaks after Windows updates to `termsrv.dll` — re-run prereq script to refresh `rdpwrap.ini`.
+- **RDP Wrapper** breaks after every Windows update that ships a new `termsrv.dll` — it looks its patch offsets up in `rdpwrap.ini`, keyed by the exact DLL build, so it stays broken until a matching entry is published (re-run the prereq script to refresh the ini). **TermWrap** (`llccd/TermWrap`) disassembles `termsrv.dll` at load and resolves the offsets itself, so it needs no ini and survives updates — preferred, since freezing Windows Update was the alternative. MultiSeat works with either: `RdpWrapper.IsMultiSessionPatchPresent` detects the patch as "TermService's `ServiceDll` is not the stock `termsrv.dll`", never by vendor filename.
 - mstsc window for each seat must never be manually disconnected (session goes Disconnected, display APIs stop working).
 - Single GPU only — multi-GPU not tested.
 - Windows 11 build 26100+ / x64 only.
@@ -159,6 +159,6 @@ Apps launch into the seat session via `ProcessInjector.LaunchInSessionAsync`. Th
 - SudoVDA virtual display driver
 - HidHide v1.5.230 (controller isolation)
 - ViGEmBus v1.22.0 EXE — not MSI (virtual controller bus)
-- RDPWrap (multi-session RDP on Windows Home/Pro)
+- A multi-session patch for Terminal Services — TermWrap (preferred) or RDPWrap
 - .NET 9 SDK
 - Node.js 20+

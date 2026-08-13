@@ -130,7 +130,7 @@ export interface SystemStatus {
   systemMemoryMb: number;
   availableMemoryMb: number;
   windowsBuild: string;
-  rdpWrapperActive: boolean;
+  multiSessionActive: boolean;
   timestamp: string;
 }
 

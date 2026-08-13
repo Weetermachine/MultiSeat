@@ -22,9 +22,9 @@ namespace MultiSeat.Service.Sessions;
 ///   Session 0 — it always launches processes in Session 0 itself.
 ///   The RDP protocol is required to trigger session creation.
 ///
-///   On Windows 11 24H2 (build 26100+), termsrv.dll must be patched via
-///   RDP Wrapper for concurrent sessions. Without it, the existing console
-///   session's user gets disconnected.
+///   On Windows 11 24H2 (build 26100+), termsrv.dll must be patched via a
+///   multi-session shim (TermWrap or RDP Wrapper) for concurrent sessions.
+///   Without it, the existing console session's user gets disconnected.
 ///
 /// Flow:
 ///   1. Store seat account credentials via cmdkey (run in console session)
@@ -177,7 +177,7 @@ public sealed class SessionLauncher
         if (sessionId < 0)
             throw new InvalidOperationException(
                 $"Failed to create session for account '{accountName}'. " +
-                "Ensure RDP Wrapper is installed and the termsrv.dll patch is active.");
+                "Ensure a multi-session patch (TermWrap or RDP Wrapper) is installed and active.");
 
         return sessionId;
     }
@@ -516,8 +516,9 @@ public sealed class SessionLauncher
                     $"RDP loopback session for '{accountName}' did not appear within timeout. " +
                     "Check the service log for the mstsc exit code logged above. " +
                     "Steps to diagnose: " +
-                    "(1) Re-run prerequisites\\install-prerequisites.ps1 to refresh rdpwrap.ini for your Windows build. " +
-                    "(2) Open RDPConf.exe and verify Listener state is 'Listening [fully supported]'. " +
+                    "(1) If using RDP Wrapper, re-run prerequisites\\install-prerequisites.ps1 to refresh " +
+                    "rdpwrap.ini for your Windows build (TermWrap needs no ini — it resolves offsets itself). " +
+                    "(2) With RDP Wrapper, open RDPConf.exe and verify Listener state is 'Listening [fully supported]'. " +
                     "(3) Manually run: mstsc /v:127.0.0.2 and log in as the seat account to verify RDP works. " +
                     "(4) Check HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp: UserAuthentication must be 0.");
             }
@@ -956,7 +957,7 @@ public sealed class SessionLauncher
             ct.ThrowIfCancellationRequested();
 
             // If mstsc already exited, the connection attempt failed (e.g. cert
-            // dialog dismissed, credential rejected, or RDP Wrapper not active).
+            // dialog dismissed, credential rejected, or the multi-session patch not active).
             // Fail fast instead of burning the full timeout.
             if (mstsc != null)
             {
@@ -967,8 +968,9 @@ public sealed class SessionLauncher
                         _logger.LogError(
                             "mstsc.exe (PID {Pid}) exited with code {Code} after {Ms}ms — " +
                             "the RDP connection attempt failed before session '{Account}' appeared. " +
-                            "Common causes: (1) rdpwrap.ini is outdated for your Windows build " +
-                            "(re-run prerequisites\\install-prerequisites.ps1), " +
+                            "Common causes: (1) with RDP Wrapper, rdpwrap.ini is outdated for your " +
+                            "Windows build (re-run prerequisites\\install-prerequisites.ps1, or switch " +
+                            "to TermWrap, which needs no per-build ini), " +
                             "(2) a certificate or credential dialog appeared that no one clicked, " +
                             "(3) Remote Desktop is disabled or the RDP port is blocked.",
                             mstsc.Id, mstsc.ExitCode, sw.ElapsedMilliseconds, accountName);
@@ -994,7 +996,7 @@ public sealed class SessionLauncher
         }
 
         // Timeout — log whether mstsc is still alive to help distinguish
-        // "mstsc still running but session never appeared" (RDP Wrapper multi-session
+        // "mstsc still running but session never appeared" (the multi-session patch
         // not working — termsrv disconnected the console user instead) vs.
         // "mstsc died silently" (which should have been caught above).
         if (mstsc != null)
@@ -1008,9 +1010,9 @@ public sealed class SessionLauncher
                     accountName, sw.ElapsedMilliseconds,
                     stillRunning ? "still running" : $"exited (code {mstsc.ExitCode})",
                     stillRunning
-                        ? "RDP Wrapper multi-session patch may not be active — " +
+                        ? "The multi-session patch may not be active — " +
                           "the connection may have reconnected an existing session instead of creating a new one. " +
-                          "Check RDPConf.exe (Listener state should be 'Listening [fully supported]')."
+                          "With RDP Wrapper, check RDPConf.exe (Listener state should be 'Listening [fully supported]')."
                         : "mstsc exited silently at timeout — see earlier logs for exit code.");
             }
             catch { /* best effort */ }

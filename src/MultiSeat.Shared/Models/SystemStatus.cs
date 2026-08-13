@@ -13,7 +13,11 @@ public sealed class SystemStatus
     public long SystemMemoryMb { get; set; }
     public long AvailableMemoryMb { get; set; }
     public string WindowsBuild { get; set; } = string.Empty;
-    public bool RdpWrapperActive { get; set; }
+    /// <summary>
+    /// True when TermService is running a multi-session shim (TermWrap, RDP Wrapper, …)
+    /// instead of the stock termsrv.dll. Not vendor-specific — see <c>RdpWrapper</c>.
+    /// </summary>
+    public bool MultiSessionActive { get; set; }
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
 }
 

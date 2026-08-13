@@ -72,4 +72,53 @@ public class RdpWrapperTests
     {
         Assert.False(RdpWrapper.IniHasOffsetsFor([], "10.0.26100.8737"));
     }
+
+    // ── Multi-session patch detection ─────────────────────────────────
+    // Detection is "ServiceDll is not stock termsrv.dll", not a vendor filename. Matching on
+    // "rdpwrap" reported a working TermWrap install as missing while three sessions ran.
+
+    [Fact]
+    public void IsMultiSessionPatchPresent_DetectsTermWrap()
+    {
+        Assert.True(RdpWrapper.IsMultiSessionPatchPresent(
+            @"C:\Program Files\TermWrap\termwrap.dll"));
+    }
+
+    [Fact]
+    public void IsMultiSessionPatchPresent_DetectsRdpWrapper()
+    {
+        Assert.True(RdpWrapper.IsMultiSessionPatchPresent(
+            @"C:\Program Files\RDP Wrapper\rdpwrap.dll"));
+    }
+
+    [Fact]
+    public void IsMultiSessionPatchPresent_RejectsStockTermsrv()
+    {
+        Assert.False(RdpWrapper.IsMultiSessionPatchPresent(
+            @"%SystemRoot%\System32\termsrv.dll"));
+    }
+
+    [Fact]
+    public void IsMultiSessionPatchPresent_RejectsStockTermsrvRegardlessOfCaseOrDirectory()
+    {
+        // Compare the filename only: System32 vs SysWOW64 and casing are not signal.
+        Assert.False(RdpWrapper.IsMultiSessionPatchPresent(@"C:\Windows\SysWOW64\TermSrv.DLL"));
+    }
+
+    [Fact]
+    public void IsMultiSessionPatchPresent_HandlesQuotedAndPaddedValues()
+    {
+        Assert.False(RdpWrapper.IsMultiSessionPatchPresent("  \"%SystemRoot%\\System32\\termsrv.dll\"  "));
+        Assert.True(RdpWrapper.IsMultiSessionPatchPresent("  \"C:\\Program Files\\TermWrap\\termwrap.dll\"  "));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void IsMultiSessionPatchPresent_ReturnsFalseWhenServiceDllIsMissing(string? serviceDll)
+    {
+        // No ServiceDll value at all is "unpatched", not "some other shim".
+        Assert.False(RdpWrapper.IsMultiSessionPatchPresent(serviceDll));
+    }
 }
