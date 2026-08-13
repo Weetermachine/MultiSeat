@@ -314,10 +314,28 @@ Start-Sleep -Milliseconds 500
 Write-Step "Service stopped and file handles released"
 
 # -- Publish ----------------------------------------------------------
+# Preserve the installed appsettings.json across the publish. `dotnet publish` copies the
+# repo's copy into the output directory, silently reverting local edits — on this host that
+# meant ApolloExePath pointing back at the repo default instead of the Apollo actually
+# installed, so seats came up with the wrong binary. Restore it afterwards; a genuinely new
+# install has no file to preserve and gets the repo's copy as before.
+$installedSettings = Join-Path $InstallDir "appsettings.json"
+$settingsBackup = $null
+if (Test-Path $installedSettings) {
+    $settingsBackup = Join-Path $env:TEMP "multiseat-appsettings-$(Get-Date -Format yyyyMMdd-HHmmss).json"
+    Copy-Item $installedSettings $settingsBackup -Force
+    Write-Step "Preserved existing appsettings.json (backup: $settingsBackup)"
+}
+
 Write-Step "Publishing MultiSeat.Service..."
 dotnet publish $ProjectDir -c Release -o "$InstallDir" --no-self-contained 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed"
+}
+
+if ($settingsBackup) {
+    Copy-Item $settingsBackup $installedSettings -Force
+    Write-Step "Restored the existing appsettings.json over the published copy"
 }
 
 # -- Build InputHook DLL ----------------------------------------------
