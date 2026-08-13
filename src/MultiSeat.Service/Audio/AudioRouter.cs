@@ -1,13 +1,22 @@
 using System.Collections.Concurrent;
-using Microsoft.Extensions.Options;
-using MultiSeat.Service.Configuration;
 using MultiSeat.Service.Sessions;
 using MultiSeat.Shared.Models;
 
 namespace MultiSeat.Service.Audio;
 
 /// <summary>
-/// Manages audio isolation for each seat.
+/// OBSOLETE — no longer called by anything. Kept only so the shared-host audio path can be
+/// resurrected if per-session audio ever has to be rolled back.
+///
+/// MultiSeat now creates each seat's RDP session with audiomode:i:0
+/// (<see cref="Sessions.SessionLauncher"/>), which gives the session its own render endpoint;
+/// Apollo runs inside the session and loopback-captures it with no sink named in sunshine.conf
+/// (<see cref="Streaming.ApolloConfigBuilder"/>). That removed the need for per-seat VB-CABLE /
+/// VoiceMeeter devices entirely — with them, the virtual devices installed themselves as the
+/// machine-wide default playback device (host lost sound) and seat count was capped by how many
+/// cables were installed. See docs/design/per-session-audio.md.
+///
+/// Everything below describes the retired shared-host design.
 ///
 /// Lifecycle per seat:
 ///   1. On seat provisioning, assigns an available VAC cable endpoint
@@ -30,7 +39,6 @@ namespace MultiSeat.Service.Audio;
 public sealed class AudioRouter
 {
     private readonly ILogger<AudioRouter> _logger;
-    private readonly MultiSeatOptions _options;
     private readonly AudioDeviceEnumerator _deviceEnumerator;
     private readonly ProcessInjector _processInjector;
 
@@ -46,12 +54,10 @@ public sealed class AudioRouter
 
     public AudioRouter(
         ILogger<AudioRouter> logger,
-        IOptions<MultiSeatOptions> options,
         AudioDeviceEnumerator deviceEnumerator,
         ProcessInjector processInjector)
     {
         _logger = logger;
-        _options = options.Value;
         _deviceEnumerator = deviceEnumerator;
         _processInjector = processInjector;
     }
@@ -184,14 +190,9 @@ public sealed class AudioRouter
                     "Audio routing will not work. " +
                     "Run prerequisites\\install-prerequisites.ps1 to install VB-CABLE and VoiceMeeter Potato.");
             }
-            else if (_vacPairs.Count < _options.MaxSeats)
-            {
-                _logger.LogWarning(
-                    "Only {Count} VAC device(s) found but MaxSeats is {Max}. " +
-                    "Each seat requires 1 virtual audio device for game audio. " +
-                    "Install more VB-CABLE or VoiceMeeter devices for additional seats.",
-                    _vacPairs.Count, _options.MaxSeats);
-            }
+
+            // The old "only N VAC devices but MaxSeats is M" warning is gone: seat count is no
+            // longer bounded by installed virtual cables, because seats no longer use them.
         }
     }
 

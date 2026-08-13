@@ -1,6 +1,23 @@
 # Design: Per-session audio isolation
 
-Status: **Proposed / scoping** · Fixes: #10, #12 · Related: #11 (display-side twin)
+Status: **Shipped** · Fixes: #10, #12 · Related: #11 (display-side twin)
+
+## What actually shipped (differs from the plan below)
+
+This fork is single-user and does not need seat microphones, so the per-session path **replaced** the shared-host path outright instead of shipping behind a flag:
+
+- **No `AudioMode` option.** `audiomode:i:0` unconditionally; the `SharedHost` branch does not exist here. (Upstream's PR keeps the flag for installs that need the mic.)
+- **The endpoint is never named.** The plan's "point Apollo at the Remote Audio endpoint (named `audio_sink`/`virtual_sink`, or rely on session default)" resolved hard to *rely on the session default*: `audio_sink` makes Apollo re-role the endpoint, and `virtual_sink` makes Apollo rewrite its wave format, breaking loopback for every client including Apollo. Both keys are absent from `sunshine.conf`, and `keep_sink_default` / `auto_capture_sink` went with them.
+- **No in-session endpoint-resolver helper.** Not needed once nothing names the endpoint — which also sidesteps the localized friendly name ("Audio remoto" on Spanish Windows).
+- **`stream_mic = disabled`.** Non-goal in the plan; in practice a session that keeps its own audio cannot reach the host's Steam Streaming Microphone at all, so the mic is gone, not merely unchanged.
+- **`AudioRouter` / `AudioDeviceEnumerator` / `VoiceMeeterConfigurator` are unwired, not deleted** — kept for rollback. `VacCableCount` and the cable-count seat cap are gone.
+- **Client-side:** "Play audio on host PC" must be **ON** — the opposite of the shared-VAC setup.
+
+R1/R2 were validated on another fork in production since 2026-08-10 with the virtual cables uninstalled.
+
+---
+
+## Original design notes
 
 ## Problem
 

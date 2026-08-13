@@ -119,20 +119,8 @@ public static class SeatEndpoints
                 }
             });
 
-        group.MapPost("/{id:guid}/audio/reset", (Guid id, SeatManager mgr) =>
-        {
-            if (mgr.GetSeat(id) is null)
-                return Results.NotFound();
-            try
-            {
-                mgr.ResetAudio(id);
-                return Results.Ok(new { status = "reset" });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.BadRequest(new { error = ex.Message });
-            }
-        });
+        // No /audio/reset — audio is per-session (audiomode:i:0) with no device assignment
+        // and no session default to re-apply, so there is nothing a reset could do.
 
         group.MapPost("/{id:guid}/display/reset",
             async (Guid id, SeatManager mgr, CancellationToken ct) =>
@@ -205,7 +193,9 @@ public static class SeatEndpoints
                 if (seat is null)
                     return Results.NotFound();
 
-                await sessionLauncher.LaunchSessionAsync(seat.AccountName, ct);
+                // Pass the seat's geometry so the reconnected session keeps its configured size
+                // instead of silently reverting to the console session's.
+                await sessionLauncher.LaunchSessionAsync(seat.AccountName, ct, seat.Width, seat.Height);
                 return Results.Ok(new { sessionId = seat.SessionId, message = "Session reconnected" });
             });
 

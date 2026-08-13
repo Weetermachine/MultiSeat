@@ -16,7 +16,6 @@ namespace MultiSeat.Service.Streaming;
 ///   - Unique server name (for Moonlight client identification)
 ///   - Isolated port range (HTTPS, HTTP, Video, Audio, Control)
 ///   - Display output target (SudoVDA device path)
-///   - Audio sink (VAC cable device ID)
 ///   - Encoder preferences (NVENC → AMF → software)
 ///   - Controller and input settings
 ///   - Logging paths
@@ -161,43 +160,32 @@ public sealed class ApolloConfigBuilder
         sb.AppendLine();
 
         // ── Audio output (game audio → Moonlight) ─────────────────────
-        // Route game audio to the seat's dedicated virtual device via Apollo's virtual_sink —
-        // the sink Apollo uses when the client does NOT play audio on the host (the normal seat
-        // case). Apollo captures this named device (WASAPI loopback) and streams it to Moonlight.
-        // Requires audiomode:i:1 in the RDP session (set in Default.rdp) so host audio devices
-        // (VB-CABLE, VoiceMeeter) are visible via WASAPI inside the session.
+        // The sink is deliberately UNNAMED — neither audio_sink nor virtual_sink is written.
+        // The seat's RDP session is created with audiomode:i:0 (SessionLauncher.EnsureDefaultRdp),
+        // which gives the session its own per-session render endpoint and makes it the session
+        // default. Apollo runs inside that session, so with both keys unset it falls through to
+        // that default and loopback-captures exactly the right endpoint.
         //
-        // We deliberately use virtual_sink (not audio_sink) and set keep_sink_default = disabled
-        // to avoid hijacking the console/host audio (issue #10). Windows has a single machine-wide
-        // default output device shared by the console session and every seat. Apollo's set_sink()
-        // changes that default globally at stream start; with keep_sink_default enabled (Apollo's
-        // default) it would also *re-assert* the seat's device as the global default whenever
-        // anything else changes it — fighting the console and other seats and leaving the host with
-        // no sound. With it disabled, Apollo still points the game at the sink for the duration of
-        // the stream and restores the previous default afterwards, without holding it. MultiSeat no
-        // longer sets the global default itself (see SeatManager — the --set-default-render step was
-        // removed for the same reason).
-        if (!string.IsNullOrEmpty(seat.AudioGameRenderFriendlyName))
-        {
-            sb.AppendLine("# Audio output — capture the seat's virtual device without holding the global default");
-            sb.AppendLine($"virtual_sink = {seat.AudioGameRenderFriendlyName}");
-        }
-        else
-        {
-            sb.AppendLine("# virtual_sink = (no game audio device assigned)");
-        }
-        sb.AppendLine("keep_sink_default = disabled");
-        sb.AppendLine("auto_capture_sink = disabled");
+        // Naming it is actively harmful, and both spellings were tried:
+        //   audio_sink   → Apollo re-roles the endpoint.
+        //   virtual_sink → Apollo rewrites the endpoint's wave format, which breaks it for every
+        //                  loopback client — including Apollo itself, so the stream goes silent.
+        // The endpoint's friendly name is localized per Windows display language, so it must not
+        // be hardcoded anywhere either. Leaving both keys absent avoids the whole class of problem
+        // and removes the need for per-seat VB-CABLE / VoiceMeeter devices (issues #10 / #12).
+        // keep_sink_default / auto_capture_sink are likewise gone: they existed to manage the
+        // machine-wide-default-device fight, which a per-session endpoint cannot have.
+        sb.AppendLine("# Audio output — sink intentionally unset: Apollo captures the session default");
+        sb.AppendLine("# (the RDP session's own per-session render endpoint under audiomode:i:0)");
         sb.AppendLine();
 
         // ── Audio input (mic from Moonlight → game) ────────────────────
-        // stream_mic: Apollo receives Moonlight mic audio, decodes Opus frames, and renders
-        // them into "Speakers (Steam Streaming Microphone)". SeatManager sets
-        // "Microphone (Steam Streaming Microphone)" as the session default capture so games
-        // automatically use it. Requires Steam installed for its audio driver.
-        // Client must be logabell/moonlight-qt-mic (standard Moonlight does not send mic packets).
-        sb.AppendLine("# Audio input — Apollo streams Moonlight mic into Steam Streaming Microphone");
-        sb.AppendLine("stream_mic = enabled");
+        // No microphone in seats, by design. A session that keeps its own audio cannot see the
+        // host's Steam Streaming Microphone, so there is nothing for Apollo to render mic audio
+        // into. Game audio out works; Moonlight → game mic does not. Accepted trade for
+        // per-session audio isolation.
+        sb.AppendLine("# Audio input — no mic: a per-session-audio seat cannot reach the host's mic driver");
+        sb.AppendLine("stream_mic = disabled");
         sb.AppendLine();
 
         // ── Input ─────────────────────────────────────────────────────

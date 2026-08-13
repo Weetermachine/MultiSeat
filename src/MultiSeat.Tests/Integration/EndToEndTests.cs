@@ -105,7 +105,6 @@ public class EndToEndTests
         Assert.Equal(Constants.DefaultApolloConfigDir, opts.ApolloConfigDir);
         Assert.Equal(Constants.DefaultApiPort, opts.ApiPort);
         Assert.Equal(string.Empty, opts.ApiKey);
-        Assert.Equal(4, opts.VacCableCount);
         Assert.False(opts.EnableKeyboardMouseIsolation); // no-op as architected; off by default
         Assert.True(opts.AutoAssignControllers);
         Assert.Equal(15_000, opts.SessionConnectTimeoutMs);

@@ -89,8 +89,7 @@ export const seats = {
   apolloRestart: (id: string) =>
     request<{ status: string }>(`/seats/${id}/apollo/restart`, { method: "POST" }),
 
-  resetAudio: (id: string) =>
-    request<{ status: string }>(`/seats/${id}/audio/reset`, { method: "POST" }),
+  // No resetAudio — audio is per-session and has no device assignment to reset.
 
   resetDisplay: (id: string) =>
     request<{ status: string }>(`/seats/${id}/display/reset`, { method: "POST" }),

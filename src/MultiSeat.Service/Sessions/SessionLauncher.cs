@@ -75,8 +75,15 @@ public sealed class SessionLauncher
     /// The caller MUST call <see cref="DisconnectSession"/> once the launched
     /// processes have finished initializing. Until then an mstsc window is
     /// minimized on the console desktop.
+    ///
+    /// <paramref name="desktopWidth"/>/<paramref name="desktopHeight"/> are the seat's
+    /// configured geometry. They are written into Default.rdp so mstsc requests that size
+    /// at connect time — the ONLY way to size the seat's RDP surface, since
+    /// ChangeDisplaySettingsEx on the Remote Display Adapter is a silent no-op from inside
+    /// the session. Leave them at 0 to inherit the console session's geometry.
     /// </summary>
-    public async Task<int> LaunchSessionAsync(string accountName, CancellationToken ct)
+    public async Task<int> LaunchSessionAsync(string accountName, CancellationToken ct,
+                                              int desktopWidth = 0, int desktopHeight = 0)
     {
         var password = _accounts.GetCredential(accountName)
             ?? throw new InvalidOperationException(
@@ -120,7 +127,8 @@ public sealed class SessionLauncher
                     "Account {Account} has DISCONNECTED session {Sid} — reconnecting via mstsc",
                     accountName, existingSessionId);
 
-                await ReconnectSessionAsync(existingSessionId, accountName, password, ct);
+                await ReconnectSessionAsync(existingSessionId, accountName, password, ct,
+                                            desktopWidth, desktopHeight);
 
                 // ReconnectSessionAsync logs a warning but doesn't throw when the session
                 // stays Disconnected (e.g. on cold boot where SYSTEM running mstsc can't
@@ -163,7 +171,8 @@ public sealed class SessionLauncher
         // No session yet (or stale session was logged off) — create one via RDP loopback.
         _logger.LogInformation("Creating background session for {Account}", accountName);
 
-        var sessionId = await CreateSessionViaRdpLoopbackAsync(accountName, password, ct);
+        var sessionId = await CreateSessionViaRdpLoopbackAsync(accountName, password, ct,
+                                                               desktopWidth, desktopHeight);
 
         if (sessionId < 0)
             throw new InvalidOperationException(
@@ -445,7 +454,8 @@ public sealed class SessionLauncher
     /// DisconnectSession() once processes have finished initializing.
     /// </summary>
     private async Task<int> CreateSessionViaRdpLoopbackAsync(
-        string accountName, string password, CancellationToken ct)
+        string accountName, string password, CancellationToken ct,
+        int desktopWidth, int desktopHeight)
     {
         var consoleSessionId = Kernel32.WTSGetActiveConsoleSessionId();
         if (consoleSessionId == 0xFFFFFFFF)
@@ -483,7 +493,7 @@ public sealed class SessionLauncher
             // mstsc treats Default.rdp as a trusted user settings file — no "unknown
             // publisher" security warning. Passing an explicit unsigned .rdp file as an
             // argument is what triggers that dialog; using Default.rdp avoids it entirely.
-            EnsureDefaultRdp(primaryConsoleToken, consoleSessionId);
+            EnsureDefaultRdp(primaryConsoleToken, consoleSessionId, desktopWidth, desktopHeight);
 
             // Step 3: Launch mstsc.exe targeting loopback (no file argument)
             _logger.LogInformation("Launching mstsc to {Addr} for {Account}...",
@@ -560,7 +570,8 @@ public sealed class SessionLauncher
     /// Stores mstsc in _pendingMstsc; caller must call DisconnectSession().
     /// </summary>
     private async Task ReconnectSessionAsync(
-        int sessionId, string accountName, string password, CancellationToken ct)
+        int sessionId, string accountName, string password, CancellationToken ct,
+        int desktopWidth, int desktopHeight)
     {
         var consoleSessionId = Kernel32.WTSGetActiveConsoleSessionId();
         if (consoleSessionId == 0xFFFFFFFF)
@@ -583,7 +594,7 @@ public sealed class SessionLauncher
                     "cmdkey exited with code {Code} during reconnect for {Account}",
                     cmdkeyExit, accountName);
 
-            EnsureDefaultRdp(primaryToken, consoleSessionId);
+            EnsureDefaultRdp(primaryToken, consoleSessionId, desktopWidth, desktopHeight);
             mstscProcess = LaunchMstscInConsoleSession(primaryToken, consoleSessionId);
             DismissMstscSecurityDialog(consoleSessionId, mstscProcess.Id);
 
@@ -1140,22 +1151,40 @@ public sealed class SessionLauncher
     /// SYSTEM writing directly to the path would bypass the redirect and land in the wrong
     /// location; running as the user lets GetFolderPath('MyDocuments') return the right path.
     /// </summary>
-    private void EnsureDefaultRdp(SafeTokenHandle consoleToken, uint consoleSessionId)
+    private void EnsureDefaultRdp(SafeTokenHandle consoleToken, uint consoleSessionId,
+                                  int desktopWidth = 0, int desktopHeight = 0)
     {
-        const string content =
+        var content =
             "authentication level:i:0\r\n" +
             "prompt for credentials:i:0\r\n" +
-            // audiomode:i:1 — play audio on the remote computer (host). This makes all host
-            // audio devices (VB-CABLE, VoiceMeeter) visible inside the RDP session via WASAPI,
-            // which is required for Apollo to loopback-capture game audio (audio_sink) and to
-            // render Moonlight mic audio (virtual_sink). With the default audiomode:i:0 (redirect
-            // to client), only "Remote Audio Output" is visible — VAC devices are invisible and
-            // both audio_sink and virtual_sink silently fail.
+            // audiomode:i:0 — audio stays INSIDE the RDP session (it is redirected to the
+            // "client", which for a loopback connection is the hidden mstsc in the console
+            // session). Windows gives every session its own per-session "Remote Audio" render
+            // endpoint and makes it that session's default, so seat games play to it and Apollo
+            // — running in the same session — WASAPI-loopback-captures it. Each seat therefore
+            // has its own isolated endpoint: no per-seat virtual audio cable is needed, the host
+            // console's playback is untouched, and seat count is no longer capped by how many
+            // VB-CABLE / VoiceMeeter devices are installed.
+            // The endpoint is deliberately NOT named in sunshine.conf — see ApolloConfigBuilder.
             // NOTE: do NOT add audiocapturemode:i:1 here — it triggers a Windows mic-access
             // security dialog that the DismissMstscSecurityDialog dismisser cannot catch,
-            // causing the RDP connection to hang. VAC-based mic routing via virtual_sink is
-            // sufficient and does not require mic redirect from the console session.
-            "audiomode:i:1\r\n" +
+            // causing the RDP connection to hang. Seats have no microphone by design
+            // (stream_mic = disabled); mic redirect from the console session is not used.
+            "audiomode:i:0\r\n" +
+            // Per-seat geometry. The RDP surface's size cannot be changed from inside the
+            // session — ChangeDisplaySettingsEx on the Remote Display Adapter returns
+            // DISP_CHANGE_SUCCESSFUL and changes nothing — so what mstsc requests here is the
+            // only thing that decides it. Without these lines the session inherits the console
+            // session's desktop size and every seat streams at the host monitor's geometry.
+            //   smart sizing:i:0   → mstsc must request the true geometry instead of scaling
+            //                        the image to fit its own window.
+            //   screen mode id:i:1 → windowed; mode 2 (fullscreen) ignores explicit width/height.
+            (desktopWidth > 0 && desktopHeight > 0
+                ? $"desktopwidth:i:{desktopWidth}\r\n" +
+                  $"desktopheight:i:{desktopHeight}\r\n" +
+                  "smart sizing:i:0\r\n" +
+                  "screen mode id:i:1\r\n"
+                : "") +
             // The mstsc window is hidden — RDP stream quality has zero user-visible impact.
             // These settings minimize TermService encoding CPU on the host:
             //   session bpp:i:8      → 8-bit color (256 colors): 1/4 the pixel data vs 32-bit
@@ -1178,6 +1207,13 @@ public sealed class SessionLauncher
         {
             Directory.CreateDirectory(@"C:\ProgramData\MultiSeat");
             File.WriteAllText(stagingPath, content);
+
+            if (desktopWidth > 0 && desktopHeight > 0)
+                _logger.LogInformation("Default.rdp geometry set to {W}x{H}", desktopWidth, desktopHeight);
+            else
+                _logger.LogDebug(
+                    "Default.rdp written without explicit geometry — " +
+                    "the seat session will inherit the console session's desktop size");
         }
         catch (Exception ex)
         {
@@ -1527,9 +1563,12 @@ public sealed class SessionLauncher
 
     /// <summary>
     /// Mute mstsc's audio session in the console session.
-    /// With audiomode:i:1 (play on remote), mstsc has no audio session in the
-    /// console session so this is typically a no-op — but it's kept as a safety
-    /// net in case mstsc creates a session-scoped audio endpoint for control traffic.
+    ///
+    /// This is ESSENTIAL, not a safety net. Under audiomode:i:0 the seat's audio is
+    /// redirected to the RDP "client" — which is this mstsc process, living in the console
+    /// session. mstsc therefore really does have an audio session there, and without this
+    /// mute the console user would hear every seat's game audio on the host's speakers.
+    /// (It was a no-op under the old audiomode:i:1 shared-host path.)
     /// The Core Audio API is session-scoped, so the helper runs in the console session.
     /// </summary>
     private void MuteMstscAudio(SafeTokenHandle consoleToken, uint consoleSessionId, int mstscPid)

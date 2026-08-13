@@ -111,7 +111,9 @@ public sealed class SessionHealthCheck
                 // sleep cycles don't exhaust the crash-restart limit.
                 _apolloManager.KillForReconnect(seat);
 
-                await _sessionLauncher.LaunchSessionAsync(seat.AccountName, ct);
+                // Pass the seat's geometry — this path runs after the PC sleeps, and without it
+                // the reconnected session comes back at the console session's size.
+                await _sessionLauncher.LaunchSessionAsync(seat.AccountName, ct, seat.Width, seat.Height);
 
                 // Give the display pipeline a moment to reinitialize after the session
                 // transitions back to Active — SudoVDA and DXGI need a beat to be ready.

@@ -3,7 +3,6 @@ using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using MultiSeat.Service.Accounts;
 using MultiSeat.Service.Api;
-using MultiSeat.Service.Audio;
 using MultiSeat.Service.Configuration;
 using MultiSeat.Service.Display;
 using MultiSeat.Service.Emulators;
@@ -24,9 +23,11 @@ namespace MultiSeat.Service.Sessions;
 ///   4. Create virtual display (SudoVDA)
 ///   5. Open firewall ports
 ///   6. Start Apollo streaming server (needs display + ports)
-///   7. Assign VAC audio cable + update Apollo config
-///   8. Create ViGEm controller + HidHide cloaking
-///   9. Broadcast Ready state to WebSocket clients
+///   7. Create ViGEm controller + HidHide cloaking
+///   8. Broadcast Ready state to WebSocket clients
+///
+/// There is no audio step — each seat's RDP session owns its own audio endpoint
+/// (audiomode:i:0) and Apollo captures it without configuration.
 ///
 /// Teardown is reverse order with best-effort exception handling.
 /// </summary>
@@ -43,7 +44,6 @@ public sealed class SeatManager
     private readonly ApolloConfigBuilder _configBuilder;
     private readonly PortAllocator _portAllocator;
     private readonly FirewallManager _firewall;
-    private readonly AudioRouter _audioRouter;
     private readonly ControllerManager _controllerManager;
     private readonly InputRouter _inputRouter;
     private readonly InputHookManager _inputHookManager;
@@ -62,7 +62,6 @@ public sealed class SeatManager
         ApolloConfigBuilder configBuilder,
         PortAllocator portAllocator,
         FirewallManager firewall,
-        AudioRouter audioRouter,
         ControllerManager controllerManager,
         InputRouter inputRouter,
         InputHookManager inputHookManager,
@@ -80,7 +79,6 @@ public sealed class SeatManager
         _configBuilder = configBuilder;
         _portAllocator = portAllocator;
         _firewall = firewall;
-        _audioRouter = audioRouter;
         _controllerManager = controllerManager;
         _inputRouter = inputRouter;
         _inputHookManager = inputHookManager;
@@ -139,8 +137,11 @@ public sealed class SeatManager
             }
 
             // ── 2. Launch background session ──────────────────────────
+            // Pass the seat's configured geometry — it lands in Default.rdp as
+            // desktopwidth/desktopheight, which is the only thing that sizes the seat's RDP
+            // surface. Without it the session inherits the console monitor's size.
             seat.SessionId = await _sessionLauncher.LaunchSessionAsync(
-                seat.AccountName, ct);
+                seat.AccountName, ct, seat.Width, seat.Height);
             _logger.LogInformation("Seat {Id}: Windows session {Sid}", seat.Id, seat.SessionId);
 
             seat.Status = SeatStatus.Configuring;
@@ -201,48 +202,16 @@ public sealed class SeatManager
             // ── 4. Firewall ───────────────────────────────────────────
             await _firewall.OpenPortsAsync(seat, ct);
 
-            // ── 5. Audio routing ──────────────────────────────────────
-            seat.ProvisioningStep = "Audio";
-            await BroadcastState(seat);
-
-            // Assign VAC before Apollo so the config has the audio device
-            seat.VacCableIndex = _audioRouter.AssignCable(seat);
-            _logger.LogDebug("Seat {Id}: VAC cable {C}", seat.Id, seat.VacCableIndex);
-
-            // ── 5.5. Set seat session default capture for mic routing ────
-            // Apollo renders Moonlight mic audio into CABLE Input (virtual_sink) from
-            // inside the seat session. CABLE Output (the capture counterpart) receives
-            // that audio at the kernel WDM level — visible in the seat session as a
-            // capture endpoint. Setting CABLE Output as the DEFAULT capture for THIS
-            // seat session means games automatically use Moonlight mic without any
-            // manual device selection.
-            //   Moonlight mic → Apollo → CABLE Input → CABLE Output → games (session default)
-            // Running inside the seat session scopes the IPolicyConfig call to that
-            // session's HKCU, so multiple seats don't conflict with each other.
-            if (!string.IsNullOrEmpty(seat.AudioCaptureDeviceId))
-            {
-                try
-                {
-                    var helperExe = Path.Combine(AppContext.BaseDirectory, "MultiSeat.Service.exe");
-                    _sessionLauncher.RunHelperInSeatSession(
-                        seat.SessionId, seat.AccountName,
-                        $"\"{helperExe}\" --set-default-capture \"{seat.AudioCaptureDeviceId}\"");
-                    _logger.LogInformation(
-                        "Seat {Id}: session capture default set to {DeviceId} (mic)",
-                        seat.Id, seat.AudioCaptureDeviceId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "Seat {Id}: could not set session capture device (non-critical)", seat.Id);
-                }
-            }
-
-            // NOTE: MultiSeat intentionally does NOT set the seat's game-audio device as the
-            // session default render. The Windows default output device is machine-wide (shared
-            // by the console and every seat), so doing so hijacked the host's audio (issue #10).
-            // Apollo points the game at the seat's device itself via virtual_sink in sunshine.conf
-            // (for the duration of the stream, restored afterwards) — see ApolloConfigBuilder.
+            // ── 5. Audio ──────────────────────────────────────────────
+            // Nothing to do. The seat's RDP session was created with audiomode:i:0, so it owns a
+            // per-session render endpoint that is already the session default, and Apollo (running
+            // inside the session) loopback-captures it with no sink named in sunshine.conf.
+            // Deliberately absent, and each removal is load-bearing:
+            //   - no virtual-cable assignment  → seat count is no longer capped by installed
+            //     VB-CABLE / VoiceMeeter devices, and nothing steals the host's default device
+            //   - no --set-default-render / --set-default-capture → the session default is already
+            //     the correct endpoint and MUST NOT be overridden
+            // Trade-off: no microphone in seats (the session cannot reach the host's mic driver).
 
             // ── 5.7. Seed emulator configs (opt-in, best-effort) ──────────
             // Write each enabled emulator's per-seat netplay config into the seat user's profile
@@ -435,7 +404,8 @@ public sealed class SeatManager
         try { UnassignControllersForSeat(seat.Id); } catch { /* best effort */ }
         try { _controllerManager.DestroyController(seat); } catch { /* best effort */ }
         try { _apolloManager.Stop(seat); } catch { /* best effort */ }
-        try { _audioRouter.ReleaseCable(seat); } catch { /* best effort */ }
+        // No audio teardown — the seat's audio endpoint lives inside its RDP session and
+        // disappears with it. Nothing host-side was ever claimed.
         try { await _firewall.ClosePortsAsync(seat, ct); } catch { /* best effort */ }
         try { await _displayManager.DestroyDisplayAsync(seat, ct); } catch { /* best effort */ }
         try { _sessionLauncher.DisconnectSession(seat.SessionId); } catch { /* best effort */ }
@@ -463,7 +433,9 @@ public sealed class SeatManager
             Apollo = seat.ApolloProcessId > 0 && _apolloManager.IsAlive(seatId),
             ApolloRestarts = _apolloManager.GetRestartCount(seatId),
             Display = !string.IsNullOrEmpty(seat.DisplayDevicePath),
-            Audio = seat.VacCableIndex >= 0,
+            // Audio is per-session: the session's own render endpoint exists for as long as the
+            // session does, so a live session IS working audio. There is no device to assign.
+            Audio = seat.SessionId >= 0,
             Controller = seat.ViGEmControllerIndex >= 0,
             ControllerManaged = _options.EnableViGEmController,
             InputHooks = _inputHookManager.IsInstalled,
@@ -600,58 +572,11 @@ public sealed class SeatManager
         }
     }
 
-    /// <summary>Reset the audio routing for a seat (release + re-assign cable + re-apply session defaults).</summary>
-    public void ResetAudio(Guid seatId)
-    {
-        var seat = GetSeat(seatId)
-            ?? throw new InvalidOperationException("Seat not found.");
-
-        _audioRouter.ReleaseCable(seat);
-        seat.VacCableIndex = _audioRouter.AssignCable(seat);
-
-        ApplyAudioDefaults(seat);
-
-        _ = BroadcastState(seat);
-        _logger.LogInformation("Seat {Id}: audio reset, cable #{C}", seatId, seat.VacCableIndex);
-    }
-
-    /// <summary>
-    /// Re-run the --set-default-capture helper in the seat's session without reassigning devices.
-    /// Call this to fix mic routing when the initial helper invocation during provisioning failed
-    /// or ran in the wrong session. Does NOT touch the default render device — that is machine-wide
-    /// and would hijack the host's audio (issue #10); Apollo manages the game-audio sink itself.
-    /// </summary>
-    public void ApplyAudioDefaults(Guid seatId)
-    {
-        var seat = GetSeat(seatId)
-            ?? throw new InvalidOperationException("Seat not found.");
-        ApplyAudioDefaults(seat);
-    }
-
-    private void ApplyAudioDefaults(SeatInfo seat)
-    {
-        var helperExe = Path.Combine(AppContext.BaseDirectory, "MultiSeat.Service.exe");
-
-        // Only the capture (mic) default is set here. The render default is intentionally left
-        // alone — see the note in ProvisionSeatAsync and ApolloConfigBuilder (issue #10).
-        if (!string.IsNullOrEmpty(seat.AudioCaptureDeviceId))
-        {
-            try
-            {
-                _sessionLauncher.RunHelperInSeatSession(
-                    seat.SessionId, seat.AccountName,
-                    $"\"{helperExe}\" --set-default-capture \"{seat.AudioCaptureDeviceId}\"");
-                _logger.LogInformation(
-                    "Seat {Id}: applied capture default {Dev} in session {Sid}",
-                    seat.Id, seat.AudioCaptureDeviceId, seat.SessionId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Seat {Id}: could not apply capture default (non-critical)", seat.Id);
-            }
-        }
-    }
+    // NOTE: ResetAudio / ApplyAudioDefaults are gone along with the virtual-cable stack.
+    // Both did exactly two things — re-assign a host virtual audio device and override the
+    // seat session's default endpoints — and per-session audio forbids both: the session's own
+    // endpoint is already correct and must not be re-pointed. The /seats/{id}/audio/reset
+    // endpoint and its dashboard button were removed with them.
 
     /// <summary>
     /// Change the NVENC quality preset for a live seat.

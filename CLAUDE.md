@@ -1,6 +1,6 @@
 # MultiSeat — Codebase Guide
 
-MultiSeat runs multiple simultaneous Moonlight game-streaming sessions on one Windows host. Each seat gets an isolated Windows account, virtual display (SudoVDA), virtual audio device, and a dedicated Apollo streaming instance, managed from a web dashboard.
+MultiSeat runs multiple simultaneous Moonlight game-streaming sessions on one Windows host. Each seat gets an isolated Windows account, virtual display (SudoVDA), its own per-session audio endpoint, and a dedicated Apollo streaming instance, managed from a web dashboard.
 
 ## Stack
 
@@ -19,7 +19,7 @@ MultiSeat runs multiple simultaneous Moonlight game-streaming sessions on one Wi
 | `SessionLauncher` | RDP loopback session creation, mstsc window management |
 | `ApolloManager` | Per-seat Apollo process management |
 | `VirtualDisplayManager` | SudoVDA virtual display attach/detach |
-| `AudioRouter` | Virtual audio device assignment per seat |
+| `AudioRouter` | **Obsolete/unwired** — retired virtual-audio-cable assignment (see Audio below) |
 | `InputRouter` | XInput/ViGEm controller routing |
 | `HidHideConfigurator` | Controller cloaking via HidHide |
 | `InputHookManager` | Keyboard/mouse session isolation (InputHook DLL) |
@@ -33,21 +33,28 @@ Each seat reserves a block of 30 ports: `PortBase + (seat_index × 30)`. Default
 - Apollo's per-seat offsets span `-5` (GFE HTTPS) to `+26` (RTSP) around the base.
 - The base sits **above** a stock Apollo's block (~47979–48010, centered on the Moonlight default 47984) so MultiSeat coexists with a standalone Apollo — see "Coexistence with a standalone Apollo" below.
 
-## Audio Device Layout
+## Audio — per-session, no virtual cables
 
-- Seat 0 → VB-CABLE basic "CABLE Input"
-- Seat 1 → VoiceMeeter "VoiceMeeter Input"
-- Seat 2 → VoiceMeeter "VoiceMeeter Aux Input"
-- Seat 3 → VoiceMeeter "VoiceMeeter VAIO3 Input"
+Each seat's RDP session is created with **`audiomode:i:0`** (`SessionLauncher.EnsureDefaultRdp`), so audio stays inside the session. Windows gives every session its own render endpoint and makes it that session's default; Apollo runs in the same session and WASAPI-loopback-captures it. No per-seat VB-CABLE / VoiceMeeter device, no machine-wide default juggling, no cable-count seat cap. See `docs/design/per-session-audio.md`.
 
-VoiceMeeter must be running — `AudioRouter` auto-starts it. Registered in `HKLM\Run` for auto-start at boot.
+Four constraints that are easy to break — all were paid for the hard way:
+
+1. **Never name the endpoint.** Both `audio_sink` and `virtual_sink` must be **absent** from `sunshine.conf` (not empty). `audio_sink` makes Apollo re-role the endpoint; `virtual_sink` makes Apollo rewrite its wave format, breaking it for every loopback client including Apollo itself. Unset → Apollo takes the session default, which is already correct.
+2. **Never hardcode its friendly name** — it is localized ("Audio remoto" on Spanish Windows). Since it is never named (per 1), never reference it at all.
+3. **Moonlight client: "Play audio on host PC" must be ON** — the opposite of the old virtual-cable setup. Safe, because the "host" of a redirected session is the seat's own session.
+4. **No microphone in seats.** A session that keeps its own audio cannot see the host's Steam Streaming Microphone, so `stream_mic = disabled`. Game audio out works; Moonlight → game mic does not. Accepted.
+
+`SessionLauncher.MuteMstscAudio` is now **load-bearing**, not a safety net: the seat's audio is redirected to the mstsc client, which lives in the console session. Without the mute, the console user hears every seat.
+
+`AudioRouter` / `AudioDeviceEnumerator` / `VoiceMeeterConfigurator` are retained but **unwired** — nothing calls them. They exist only so the shared-host path can be resurrected if this ever has to be rolled back.
 
 ## Streaming behavior — resolution, audio, controller
 
 Reflects fixes shipped 2026-07-24 (GitHub issues #11 / #10 / #9a):
 
 - **Resolution follows the Moonlight client.** Each per-seat `sunshine.conf` sets Apollo's display-device keys — `dd_configuration_option = ensure_active`, `dd_resolution_option = auto`, `dd_refresh_rate_option = auto` (`ApolloConfigBuilder`). Apollo resizes the SudoVDA display to the mode the client requests on connect. The dashboard resolution is the SudoVDA creation/advertised default, **not** authoritative. **Requires the client's "Optimize game settings" (SOPS) enabled** — otherwise Apollo leaves the mode unchanged. Without the `dd_*` keys, `dd_configuration_option` defaults to `disabled` and Apollo never resizes the virtual display (it stays at the host/RDP surface size).
-- **Seat audio does not hijack the host default.** The seat's virtual audio device is written as Apollo's `virtual_sink` (not `audio_sink`) with `keep_sink_default = disabled` + `auto_capture_sink = disabled`, and MultiSeat no longer runs `--set-default-render`. Windows has a **single machine-wide default output** shared by the console + all seats; Apollo still points the game at the sink during an active stream and restores the previous default afterward, without re-asserting it. Keep the client's "Play audio on host PC" **off** so `virtual_sink` is used. Not full isolation — true N-way seat audio needs per-app routing (`IAudioPolicyConfigFactory::SetPersistedDefaultAudioEndpoint`), not yet built.
+- **Seat resolution is set at RDP connect time.** `SeatInfo.Width`/`Height` reach mstsc as `desktopwidth`/`desktopheight` in `Default.rdp` (`SessionLauncher.EnsureDefaultRdp`, plus `smart sizing:i:0` and `screen mode id:i:1`). This is the **only** way to size the seat's RDP surface — `ChangeDisplaySettingsEx` on the Remote Display Adapter returns `DISP_CHANGE_SUCCESSFUL` and changes nothing from inside the session. It matters because on some hosts Apollo's SudoVDA display attaches to the console desktop instead of the seat's (upstream #15), `output_name` stays `pending`, and Apollo falls back to capturing the RDP surface. Every call path that creates **or reconnects** a session must pass the seat's geometry (`SeatManager`, `SessionHealthCheck`'s post-sleep reconnect, the `session-reconnect` endpoint) — miss one and that seat silently reverts to console geometry.
+- **Seat audio is per-session** — see "Audio — per-session, no virtual cables" above. Nothing host-side is claimed, so the console session and other seats are unaffected.
 - **Controller forwarding is native by default.** `EnableViGEmController` defaults **off** — Apollo forwards the Moonlight client's controller into the seat itself and MultiSeat creates no ViGEm pad. The dashboard shows the seat's Controller service as **"Native"** (not a down light) and the Input tab notes that XInput→seat assignment only applies when `EnableViGEmController` is on. `SeatServices.ControllerManaged` + `GET /api/input/mode` surface the mode.
 
 ## Install / Deploy
@@ -143,15 +150,13 @@ Apps launch into the seat session via `ProcessInjector.LaunchInSessionAsync`. Th
 - mstsc window for each seat must never be manually disconnected (session goes Disconnected, display APIs stop working).
 - Single GPU only — multi-GPU not tested.
 - Windows 11 build 26100+ / x64 only.
-- VoiceMeeter audio drivers only register after a reboot post-install.
+- No microphone in seats, and no HDR (the RDP surface has no EDID).
 - Keyboard/mouse session isolation (`InputHookManager` + InputHook DLL) is **disabled by default and currently a no-op**. The low-level `WH_KEYBOARD_LL`/`WH_MOUSE_LL` hooks run in the SYSTEM service (Session 0), where `GetForegroundWindow()` returns NULL, so `ShouldPassThrough()` always passes — the filter never blocks. With the RDP-loopback design there is no cross-session K/M bleed anyway: physical input goes to the console session, and Moonlight input is `SendInput`'d inside the seat session. Re-enabling is only meaningful if the hook is re-architected to run inside the seat session.
 
 ## Required Prerequisites
 
 - Apollo (Sunshine fork with multi-instance support) — NOT upstream Sunshine
 - SudoVDA virtual display driver
-- VB-CABLE basic (seat 0 audio)
-- VoiceMeeter Potato (seats 1–3 audio)
 - HidHide v1.5.230 (controller isolation)
 - ViGEmBus v1.22.0 EXE — not MSI (virtual controller bus)
 - RDPWrap (multi-session RDP on Windows Home/Pro)

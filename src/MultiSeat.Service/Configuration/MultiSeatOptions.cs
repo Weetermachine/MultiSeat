@@ -23,8 +23,10 @@ public sealed class MultiSeatOptions
     public bool RequireHttps { get; set; } = true;
     public string[] CorsOrigins { get; set; } = [];
 
-    // ── Virtual Audio Cable ──────────────────────────────────────────
-    public int VacCableCount { get; set; } = 4;  // number of VAC cables installed
+    // NOTE: VacCableCount is gone. Seats no longer use host virtual audio cables — each seat's
+    // RDP session owns its own audio endpoint (audiomode:i:0), so seat count is not bounded by
+    // installed VB-CABLE / VoiceMeeter devices. Existing appsettings.json files may still carry
+    // the key; the configuration binder ignores unknown keys, so leaving it there is harmless.
 
     // ── HidHide ──────────────────────────────────────────────────────
     public string HidHideCliPath { get; set; } = @"C:\Program Files\Nefarius Software Solutions\HidHide\x64\HidHideCLI.exe";

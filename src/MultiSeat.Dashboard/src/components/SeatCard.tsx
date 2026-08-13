@@ -361,19 +361,12 @@ export function SeatCard({ seat, onUpdate }: Props) {
                     </button>
                   }
                 />
+                {/* Per-session audio: the seat's RDP session owns its own audio endpoint, so
+                    there is no device assignment to show and nothing a Reset could re-point. */}
                 <ServiceRow
                   name="Audio"
                   active={services.audio}
-                  detail={seat.vacCableIndex >= 0 ? `VAC #${seat.vacCableIndex}` : undefined}
-                  actions={
-                    <button
-                      className="btn-sm"
-                      disabled={actionLoading !== null}
-                      onClick={() => serviceAction("audio-reset", () => seatsApi.resetAudio(seat.id))}
-                    >
-                      {actionLoading === "audio-reset" ? "..." : "Reset"}
-                    </button>
-                  }
+                  detail="Per-session"
                 />
                 {services.controllerManaged ? (
                   <ServiceRow

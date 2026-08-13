@@ -103,24 +103,28 @@ export function TipsPage() {
       <Section title="Audio & Microphone">
         <TipCard title="Game audio">
           <p>
-            Each seat uses a dedicated virtual audio device (VB-CABLE or VoiceMeeter bus).
-            Apollo loopback-captures from that device so only that seat's game audio is streamed.
-            If audio is silent after provisioning, use <strong>Manage Services → Audio → Reset</strong>
-            on the seat card.
-          </p>
-        </TipCard>
-
-        <TipCard title="Microphone passthrough">
-          <p>
-            ApolloVibe streams the Moonlight client's microphone into the seat session via
-            <strong> Steam Streaming Microphone</strong>. Games see it as a normal mic input — no
-            extra configuration required.
+            Audio stays inside each seat's own session — the session has its own audio endpoint and
+            Apollo captures it in place. No virtual audio cable is involved, seats never touch the
+            host's playback device, and seat count is not limited by installed audio devices.
           </p>
           <ul>
-            <li>Requires the standard Moonlight client (mic packets are supported in ApolloVibe)</li>
-            <li>Steam must be installed in the seat's Windows account for the audio driver</li>
-            <li>If the mic is silent, restart Apollo from the seat card</li>
+            <li>
+              Turn <strong>"Play audio on host PC" ON</strong> in the Moonlight client. This is
+              required, and is the opposite of the old virtual-cable setup — the "host" of a
+              redirected session is the seat's own session.
+            </li>
+            <li>VB-CABLE and VoiceMeeter are no longer needed and can be uninstalled</li>
+            <li>If audio is silent, restart Apollo from the seat card</li>
           </ul>
+        </TipCard>
+
+        <TipCard title="Microphone — not available">
+          <p>
+            Seats have <strong>no microphone</strong>. A session that keeps its own audio cannot
+            reach the host's Steam Streaming Microphone, so there is nothing for Apollo to render
+            client mic audio into. Game audio out works; Moonlight → game mic does not. This is the
+            accepted trade for per-session audio isolation.
+          </p>
         </TipCard>
       </Section>
 

@@ -9,7 +9,7 @@ MultiSeat lets you run multiple simultaneous Moonlight game-streaming sessions o
 ## How It Works
 
 1. You create or link a Windows local account for each streaming seat.
-2. MultiSeat provisions a seat: launches a dedicated Apollo process in the account's RDP session, attaches a virtual display (SudoVDA), and routes a virtual audio cable (VB-CABLE) to it.
+2. MultiSeat provisions a seat: launches a dedicated Apollo process in the account's RDP session and attaches a virtual display (SudoVDA). Audio needs no setup — the RDP session owns its own audio endpoint and Apollo captures it in place.
 3. The Moonlight client connects to the seat's Apollo instance using the host's IP and the seat's assigned port.
 4. Each seat streams independently with isolated input, audio, and display.
 
@@ -33,7 +33,6 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the full hardware and software requir
 - .NET 9 Runtime
 - Apollo (Sunshine fork with multi-instance support)
 - SudoVDA virtual display driver (one virtual display per seat)
-- VB-CABLE virtual audio (one per seat)
 - HidHide (controller isolation)
 - ViGEmBus (virtual controller driver)
 - RDPWrap (multi-session RDP on Windows Home/Pro)
@@ -74,8 +73,6 @@ This script automatically downloads and installs everything:
 |----------|---------|
 | ViGEmBus | Virtual Xbox controller driver |
 | HidHide | Hides physical controllers from the host |
-| VB-CABLE (basic) | Virtual audio device for seat 0 (free, auto-downloaded) |
-| VoiceMeeter Potato | 3 additional virtual audio devices for seats 1–3 (free, auto-downloaded) |
 | RDPWrap + rdpwrap.ini | Enables concurrent RDP sessions on Windows Home/Pro |
 | Apollo | Sunshine fork with multi-instance streaming support |
 | SudoVDA | Virtual display driver (one display per seat) |
@@ -171,7 +168,6 @@ Edit `appsettings.json` in `C:\Program Files\MultiSeat\` (restart the service af
 | `ApolloConfigDir` | `C:\ProgramData\MultiSeat\apollo` | Per-seat config directory |
 | `ApiPort` | `9550` | Dashboard port |
 | `ApiKey` | *(auto-generated)* | API key required to access the dashboard. Auto-generated on first start and saved to `C:\ProgramData\MultiSeat\api-key.txt`. Set a fixed value here to override. Set to `disabled` to turn off authentication entirely (only safe on a fully trusted private network). |
-| `VacCableCount` | `4` | Number of installed VB-CABLE devices |
 | `EnableKeyboardMouseIsolation` | `false` | Keyboard/mouse session isolation (no-op as architected — see Known Constraints in CLAUDE.md) |
 | `EnableSharedGameLibrary` | `true` | Create a shared games/ROMs folder all seats can use |
 | `SharedGameLibraryDir` | `C:\MultiSeatGames` | Root of the shared library (`\SteamLibrary` + `\ROMs`) |
@@ -251,7 +247,6 @@ MultiSeatService (Windows Service, SYSTEM)
 ├── SessionLauncher       — RDP session + mstsc window management
 ├── ApolloManager         — per-seat Apollo process management
 ├── VirtualDisplayManager — SudoVDA display attach/detach
-├── AudioRouter           — VB-CABLE assignment per seat
 ├── InputRouter           — XInput/ViGEm controller routing
 ├── HidHideConfigurator   — controller cloaking
 ├── InputHookManager      — keyboard/mouse session isolation
@@ -312,8 +307,11 @@ Controller isolation is handled by HidHide, not the InputHook DLL. Ensure HidHid
 **RDPWrap shows "Not supported" after a Windows update**
 Re-run `prerequisites\install-prerequisites.ps1` — it will fetch the latest `rdpwrap.ini` automatically.
 
-**Multiple VB-CABLE devices needed**
-Each seat requires one VB-CABLE. After installing the first one via the prerequisites script, run `VBCABLE_Setup_x64.exe` manually for each additional seat (found in the extracted `VBCABLE_Driver_Pack45.zip`).
+**No sound in a seat**
+Turn **"Play audio on host PC" ON** in the Moonlight client. Seats use per-session audio, so the "host" of a redirected session is the seat's own session — this is the opposite of the old virtual-cable setup, where it had to be off. Seats have no microphone (a session that keeps its own audio cannot reach the host's mic driver).
+
+**VB-CABLE / VoiceMeeter are no longer needed**
+Seats used to require one virtual audio device each. They now use their RDP session's own audio endpoint, so the virtual cables can be uninstalled — which also fixes them installing themselves as the machine-wide default playback device and leaving the host silent.
 
 ---
 

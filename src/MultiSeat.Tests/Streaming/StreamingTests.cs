@@ -137,7 +137,6 @@ public class StreamingTests
                 Width = 1920,
                 Height = 1080,
                 Fps = 60,
-                AudioGameRenderFriendlyName = "CABLE In 16ch (VB-Audio Virtual Cable)",
             };
 
             var configPath = builder.BuildConfig(seat, tempDir);
@@ -158,16 +157,18 @@ public class StreamingTests
             Assert.Contains("dd_refresh_rate_option = auto", content);
             Assert.Contains("encoder = nvenc", content);
             Assert.Contains("controller = enabled", content);
-            Assert.Contains("stream_mic = enabled", content);
             Assert.Contains("min_log_level = info", content);
-            // Audio: route the game to the seat's virtual device WITHOUT holding the machine-wide
-            // default output, so seats don't hijack the console/host audio (issue #10).
-            Assert.Contains("virtual_sink = CABLE In 16ch (VB-Audio Virtual Cable)", content);
-            Assert.Contains("keep_sink_default = disabled", content);
-            Assert.Contains("auto_capture_sink = disabled", content);
-            // audio_sink (the "play on host too" device) must NOT be set — it would make Apollo
-            // grab the global default at stream start.
+            // Audio: BOTH sink keys must be absent — not empty — so Apollo falls through to the
+            // seat session's own default endpoint (audiomode:i:0). Naming it makes Apollo re-role
+            // it (audio_sink) or rewrite its wave format (virtual_sink), either of which silences
+            // the stream. keep_sink_default / auto_capture_sink went with the shared-default
+            // problem they existed to manage.
+            Assert.DoesNotContain("virtual_sink =", content);
             Assert.DoesNotContain("audio_sink =", content);
+            Assert.DoesNotContain("keep_sink_default", content);
+            Assert.DoesNotContain("auto_capture_sink", content);
+            // No mic: a session that keeps its own audio cannot reach the host's mic driver.
+            Assert.Contains("stream_mic = disabled", content);
         }
         finally
         {
