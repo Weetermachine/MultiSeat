@@ -62,8 +62,12 @@ Reflects fixes shipped 2026-07-24 (GitHub issues #11 / #10 / #9a):
 Two separate scripts — prereqs and service deploy are intentionally split:
 
 ```powershell
-# Step 1: Install all prerequisites (drivers, audio devices, RDPWrap, etc.)
+# Step 1: Install all prerequisites (drivers, multi-session patch, Apollo, etc.)
+# Installs TermWrap by default; pass -UseRdpWrapper for the legacy RDP Wrapper path.
 .\prerequisites\install-prerequisites.ps1
+
+# TermWrap on its own (idempotent; verifies the end state and exits non-zero on any failure)
+.\prerequisites\install-termwrap.ps1
 # Reboot if prompted, then re-run to confirm clean.
 # Log: prerequisites\prereq.log
 

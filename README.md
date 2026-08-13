@@ -73,7 +73,7 @@ This script automatically downloads and installs everything:
 |----------|---------|
 | ViGEmBus | Virtual Xbox controller driver |
 | HidHide | Hides physical controllers from the host |
-| TermWrap *or* RDPWrap + rdpwrap.ini | Enables concurrent RDP sessions on Windows client editions |
+| TermWrap | Enables concurrent RDP sessions on Windows client editions (installed by `install-termwrap.ps1`; pass `-UseRdpWrapper` for the legacy RDPWrap path) |
 | Apollo | Sunshine fork with multi-instance streaming support |
 | SudoVDA | Virtual display driver (one display per seat) |
 | .NET 9 SDK | Required to build and run MultiSeat.Service |
@@ -81,7 +81,13 @@ This script automatically downloads and installs everything:
 
 It also enables Remote Desktop and opens the required firewall ports automatically.
 
-> **Reboot** when prompted — HidHide and RDPWrap require it before the service will work.
+> **Reboot** when prompted — HidHide and the multi-session patch require it before the service will work.
+
+> **Multi-session patch.** Windows client editions allow one interactive session, so a shim must load in place of the stock `termsrv.dll`. The prerequisites script installs **[TermWrap](https://github.com/llccd/TermWrap)** by default, which finds its patch offsets by disassembling `termsrv.dll` and therefore survives Windows updates. The legacy **RDPWrap** needs an `rdpwrap.ini` entry matching every `termsrv.dll` build and breaks on each cumulative update until one is published — pass `-UseRdpWrapper` if you specifically need it. To install or re-verify TermWrap on its own:
+> ```powershell
+> .\prerequisites\install-termwrap.ps1
+> ```
+> It is idempotent and verifies the end state (ServiceDll, both DLLs, TermService, a listener on 3389, and three registry values) before reporting success.
 
 ### Step 3 — Install the MultiSeat service
 
@@ -305,7 +311,15 @@ Controller isolation is handled by HidHide, not the InputHook DLL. Ensure HidHid
 `EnableKeyboardMouseIsolation` is off by default, and turning it on currently does nothing: the low-level hooks are installed from the service process in Session 0, where `GetForegroundWindow()` returns NULL, so the filter always passes the event through. There is also no cross-session bleed to prevent in the RDP-loopback design — physical input goes to the console session, and Moonlight input is injected inside the seat session. Making this meaningful requires re-architecting the hook to run inside the seat session; a missing `MultiSeatInputHook.dll` is therefore harmless.
 
 **RDPWrap shows "Not supported" after a Windows update**
-RDP Wrapper looks its patch offsets up in `rdpwrap.ini`, keyed by the exact `termsrv.dll` build, so every cumulative update that ships a new one breaks it until a matching entry is published. Re-run `prerequisites\install-prerequisites.ps1` to fetch the latest ini — or switch to [TermWrap](https://github.com/llccd/TermWrap), which disassembles `termsrv.dll` at load and resolves the offsets itself, so it needs no ini and survives updates. MultiSeat detects either: it checks that TermService's `ServiceDll` is not the stock `termsrv.dll`, not which product installed it.
+RDP Wrapper looks its patch offsets up in `rdpwrap.ini`, keyed by the exact `termsrv.dll` build, so every cumulative update that ships a new one breaks it until a matching entry is published. Re-run `prerequisites\install-prerequisites.ps1` to fetch the latest ini — or switch to [TermWrap](https://github.com/llccd/TermWrap) with `prerequisites\install-termwrap.ps1`, which disassembles `termsrv.dll` at load and resolves the offsets itself, so it needs no ini and survives updates. MultiSeat detects either: it checks that TermService's `ServiceDll` is not the stock `termsrv.dll`, not which product installed it.
+
+**Seats fail to provision after switching to TermWrap**
+TermWrap's own README does not mention two registry values that leave RDP broken if wrong, both under `HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server`:
+
+- `fDenyTSConnections = 1` — Remote Desktop is off entirely and nothing binds port 3389. RDP Wrapper's uninstaller sets this, so it bites exactly when migrating.
+- `fSingleSessionPerUser = 1` — RDP listens, but `mstsc /v:127.0.0.2` opens a window that closes immediately and the log reads *"the connection may have reconnected an existing session instead of creating a new one"*. This is RDPConf's "Single session per user" checkbox.
+
+`install-termwrap.ps1` sets both to `0`, along with `UserAuthentication = 0` and `TermService` to Automatic, and fails loudly if any of them is still wrong afterwards. Re-run it to re-assert them.
 
 **No sound in a seat**
 Turn **"Play audio on host PC" ON** in the Moonlight client. Seats use per-session audio, so the "host" of a redirected session is the seat's own session — this is the opposite of the old virtual-cable setup, where it had to be off. Seats have no microphone (a session that keeps its own audio cannot reach the host's mic driver).

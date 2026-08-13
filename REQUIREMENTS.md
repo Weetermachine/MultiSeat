@@ -125,18 +125,31 @@ Download: https://github.com/nefarius/ViGEmBus/releases
 
 ---
 
-### RDPWrap (Multi-Session RDP)
+### Multi-Session Patch — TermWrap (recommended) or RDPWrap (legacy)
 
-Windows Home and Pro editions normally allow only one concurrent RDP session. RDPWrap patches `termsrv.dll` to allow multiple simultaneous sessions.
+Windows Home and Pro editions normally allow only one concurrent interactive session. A shim must load in place of the stock `termsrv.dll` to lift that limit. Two products do this and MultiSeat works with either — it detects the patch as "TermService's `ServiceDll` is not the stock `termsrv.dll`", never by vendor filename.
 
 | Requirement | Details |
 |-------------|---------|
-| **RDPWrap** | v1.6.2+ |
+| **TermWrap** (recommended) | v0.6+ — finds its patch offsets by disassembling `termsrv.dll` with Zydis, so it needs no per-build config and **survives Windows updates** |
+| **RDPWrap** (legacy) | v1.6.2+ — looks its offsets up in `rdpwrap.ini`, keyed by the exact `termsrv.dll` build, so **every cumulative update that ships a new one breaks multi-session** until a matching ini entry is published |
 | **Required for** | Windows 10/11 Home and Pro |
 | **Not needed for** | Windows Server (multi-session is built in) |
-| **Notes** | Must be kept updated when Windows updates `termsrv.dll` |
 
-Download: https://github.com/stascorp/rdpwrap
+Install: `prerequisites\install-termwrap.ps1` (or `install-prerequisites.ps1`, which calls it by default; pass `-UseRdpWrapper` for the legacy path).
+
+Downloads: https://github.com/llccd/TermWrap · https://github.com/stascorp/rdpwrap
+
+**Two gotchas that are not in TermWrap's own documentation.** Following its README's four steps exactly left RDP completely broken on the development host, because two registry values under `HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server` were wrong afterwards and TermWrap's `.reg` sets neither:
+
+| Value | Broken state | Symptom |
+|---|---|---|
+| `fDenyTSConnections` | `1` | Remote Desktop switched off entirely — nothing binds 3389 no matter what TermService does. Set by RDP Wrapper's uninstaller, so it bites precisely when migrating. |
+| `fSingleSessionPerUser` | `1` | RDP listens, but `mstsc /v:127.0.0.2` opens a window that closes immediately and MultiSeat logs *"the connection may have reconnected an existing session instead of creating a new one"*. This is RDPConf's "Single session per user" checkbox. |
+
+`TermService` was also left `Stopped`/`Manual` and had to be started and set to `Automatic`. `install-termwrap.ps1` asserts all three (plus `UserAuthentication = 0`, which MultiSeat requires and RDP Wrapper's removal may reset) and verifies the end state before reporting success.
+
+Rollback: `reg import "C:\Program Files\RDP Wrapper\Revert_to_default.reg"`, reboot, then delete the TermWrap DLLs.
 
 ---
 
@@ -239,5 +252,5 @@ Default `PortBase` = 48100. Each additional seat adds 30 to the base (Seat 1 = 4
 
 - **NVIDIA consumer GPU concurrent sessions:** GTX/RTX consumer cards have a driver-enforced limit of 3–5 simultaneous NVENC sessions. Use an NVENC session limiter patcher or a professional GPU to exceed this.
 - **Virtual display disconnect:** If the mstsc session managing a seat's virtual display is disconnected, Apollo loses access to the display and streaming fails. MultiSeat keeps this session active automatically — do not manually disconnect it.
-- **Windows updates:** Windows updates that replace `termsrv.dll` will break RDPWrap until it is updated. Check the RDPWrap GitHub for updated `rdpwrap.ini` patches.
+- **Windows updates:** a Windows update that replaces `termsrv.dll` breaks **RDPWrap** until a matching `rdpwrap.ini` entry is published — check the RDPWrap GitHub for updated patches. **TermWrap is not affected**: it resolves its offsets by disassembling whatever `termsrv.dll` is installed. This is the reason TermWrap is the recommended path.
 - **Single GPU:** Multi-GPU configurations are not tested. All seats should use the same GPU for encoding.

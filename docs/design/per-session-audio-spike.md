@@ -124,8 +124,10 @@ $dll = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\TermService\Pa
 > System32 path — which returns `False` on a perfectly healthy install and told the
 > operator to STOP. Always resolve the path from `ServiceDll`, as above.
 
-> ❌ **If `ServiceDll` says `termsrv.dll`, or either file is missing, RDPWrap is not active. STOP.**
-> Re-run `prerequisites\install-prerequisites.ps1`, reboot, and re-check.
+> ❌ **If `ServiceDll` says `termsrv.dll`, no multi-session patch is active. STOP.**
+> Run `prerequisites\install-termwrap.ps1`, reboot, and re-check. (On an RDP Wrapper install,
+> `prerequisites\install-prerequisites.ps1 -UseRdpWrapper` refreshes `rdpwrap.ini` instead —
+> that advice applies only to RDP Wrapper; TermWrap has no ini.)
 
 The strongest evidence is empirical: if `qwinsta` already shows **two `Active` sessions** (your console plus a seat), multi-session is provably working right now.
 
@@ -192,7 +194,7 @@ qwinsta
 
 **Expected:** your original console session still `Active`, **plus** a new `audiotest` session.
 
-> ❌ **If your console session got disconnected**, RDPWrap is broken. Stop — re-run `prerequisites\install-prerequisites.ps1` to refresh `rdpwrap.ini`, then start over.
+> ❌ **If your console session got disconnected**, the multi-session patch is broken. Stop — run `prerequisites\install-termwrap.ps1` (or, on an RDP Wrapper install, `install-prerequisites.ps1 -UseRdpWrapper` to refresh `rdpwrap.ini`), then start over.
 
 **Leave this RDP session open for every test below.**
 
@@ -406,7 +408,7 @@ Notes / anything unexpected:
 
 ## Troubleshooting
 
-**Console session disconnected when connecting** — RDPWrap is broken. Re-run `prerequisites\install-prerequisites.ps1`.
+**Console session disconnected when connecting** — the multi-session patch is broken. Run `prerequisites\install-termwrap.ps1` (RDP Wrapper installs: `install-prerequisites.ps1 -UseRdpWrapper`, which refreshes `rdpwrap.ini`).
 
 **Certificate / "can't verify identity" warning** — expected for loopback RDP; accept it.
 

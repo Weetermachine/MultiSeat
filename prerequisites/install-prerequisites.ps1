@@ -13,11 +13,18 @@
 .PARAMETER Seats
     Number of seats to provision audio cables for. Defaults to 4.
     Each seat needs one VB-CABLE device.
+.PARAMETER UseRdpWrapper
+    Install RDP Wrapper for multi-session instead of TermWrap (the default).
+    Legacy path: RDP Wrapper needs an rdpwrap.ini entry matching the exact termsrv.dll build,
+    so any Windows update that ships a new one breaks concurrent sessions until a matching
+    entry is published. TermWrap resolves its offsets by disassembling termsrv.dll and has no
+    such dependency. Use this only if TermWrap does not work on your host.
 #>
 param(
     [switch]$SkipReboot,
     [switch]$SkipDownload,
-    [int]$Seats = 4
+    [int]$Seats = 4,
+    [switch]$UseRdpWrapper
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,8 +50,9 @@ if (-not [Environment]::Is64BitProcess -and [Environment]::Is64BitOperatingSyste
     if (Test-Path $NativeHost) {
         Write-Host "[MultiSeat] Running under 32-bit PowerShell -- re-launching in 64-bit..." -ForegroundColor Yellow
         $Fwd = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
-        if ($SkipReboot)   { $Fwd += '-SkipReboot' }
-        if ($SkipDownload) { $Fwd += '-SkipDownload' }
+        if ($SkipReboot)    { $Fwd += '-SkipReboot' }
+        if ($SkipDownload)  { $Fwd += '-SkipDownload' }
+        if ($UseRdpWrapper) { $Fwd += '-UseRdpWrapper' }
         $Fwd += @('-Seats', $Seats)
         & $NativeHost @Fwd
         if ($null -eq $LASTEXITCODE) { exit 0 } else { exit $LASTEXITCODE }
@@ -642,9 +650,51 @@ if ($totalVac -lt $Seats) {
 }
 
 # ----------------------------------------------------------------
-# 4. RDP Wrapper Library
+# 4. Multi-session patch  --  TermWrap (default) or RDP Wrapper (legacy)
 # ----------------------------------------------------------------
-Write-Step "RDP Wrapper Library (concurrent RDP sessions)"
+# Windows client editions allow one interactive session; MultiSeat needs several, so a shim
+# must load in place of the stock termsrv.dll. Two products do this and MultiSeat works with
+# either -- but they fail very differently:
+#
+#   TermWrap (default)  disassembles termsrv.dll with Zydis and finds the patch offsets
+#                       itself, so it needs no per-build config and survives Windows updates.
+#   RDP Wrapper (-UseRdpWrapper)
+#                       looks its offsets up in rdpwrap.ini, keyed by the exact termsrv.dll
+#                       build. Every cumulative update that ships a new termsrv.dll breaks it
+#                       until somebody publishes a matching ini entry. That cost this host an
+#                       uninstalled KB and a fully disabled Windows Update -- which is why it
+#                       is no longer the default.
+if (-not $UseRdpWrapper) {
+    Write-Step "TermWrap (concurrent RDP sessions)"
+
+    $twScript = Join-Path $ScriptDir "install-termwrap.ps1"
+    if (-not (Test-Path $twScript)) {
+        Write-Skip "install-termwrap.ps1 not found next to this script"
+    } else {
+        # install-termwrap.ps1 is idempotent and verifies the end state itself, so it is safe
+        # to run on every prerequisites pass. It exits non-zero if anything is actually wrong.
+        $twArgs = @{}
+        if ($SkipDownload) { $twArgs["SkipDownload"] = $true }
+        if ($SkipReboot)   { $twArgs["SkipReboot"]   = $true }
+
+        & $twScript @twArgs
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "TermWrap active and verified"
+            $Installed += "TermWrap"
+            $NeedsReboot = $true
+        } else {
+            Write-Host "  WARNING: install-termwrap.ps1 reported failures (exit $LASTEXITCODE)." -ForegroundColor Yellow
+            Write-Host "  See its check list above. To use the legacy path instead, re-run this" -ForegroundColor Yellow
+            Write-Host "  script with -UseRdpWrapper." -ForegroundColor Yellow
+            $Skipped += "TermWrap (verification failed)"
+        }
+    }
+} else {
+
+Write-Step "RDP Wrapper Library (legacy multi-session path)"
+Write-Host "  NOTE: RDP Wrapper needs an rdpwrap.ini entry matching your exact termsrv.dll" -ForegroundColor Yellow
+Write-Host "  build, so a Windows update can break multi-session until one is published." -ForegroundColor Yellow
+Write-Host "  Omit -UseRdpWrapper to install TermWrap instead, which has no such dependency." -ForegroundColor Yellow
 
 # Helper: get the resolved path that TermService's ServiceDll registry value points to.
 # RDP Wrapper v1.6.2+ registers the DLL via the TermService ServiceDll key rather than
@@ -734,6 +784,8 @@ if ($existingDll) {
         Write-Skip "RDPWrap  --  get from https://github.com/stascorp/rdpwrap/releases"
     }
 }
+
+}  # end -UseRdpWrapper legacy branch
 
 # ----------------------------------------------------------------
 # 5. Apollo (vibesoftwarecoder fork — mic passthrough + latest Apollo HEAD)
