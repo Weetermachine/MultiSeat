@@ -151,7 +151,8 @@ Windows Home and Pro editions normally allow only one concurrent RDP session. RD
 
 | Requirement | Details |
 |-------------|---------|
-| **RDPWrap** | v1.6.2+ |
+| **TermWrap** (default) | v0.6+ — finds its offsets by disassembling `termsrv.dll`, so no per-build ini and no breakage on Windows updates. Install with `prerequisites\install-termwrap.ps1`. |
+| **RDPWrap** (alternative) | v1.6.2+ — offsets come from `rdpwrap.ini`, keyed by exact `termsrv.dll` build |
 | **Required for** | Windows 10/11 Home and Pro |
 | **Not needed for** | Windows Server (multi-session is built in) |
 | **Notes** | Must be kept updated when Windows updates `termsrv.dll` |

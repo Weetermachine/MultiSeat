@@ -32,7 +32,9 @@ param(
     [switch]$SkipDownload,
     [int]$Seats = 4,
     [ValidateSet('PerSession', 'SharedHost')]
-    [string]$AudioMode
+    [string]$AudioMode,
+    [ValidateSet('TermWrap', 'RdpWrapper')]
+    [string]$MultiSessionPatch = 'TermWrap'
 )
 
 $ErrorActionPreference = "Stop"
@@ -808,8 +810,49 @@ if ($installAudioCables) {
 }  # end: if ($installAudioCables)
 
 # ----------------------------------------------------------------
-# 4. RDP Wrapper Library
+# 4. Multi-session patch  --  TermWrap (default) or RDP Wrapper
 # ----------------------------------------------------------------
+# Both lift the one-interactive-session limit by loading a shim in place of the stock
+# termsrv.dll; they differ in how they find the patch offsets.
+#
+#   TermWrap (default)  disassembles termsrv.dll with Zydis at load and finds the offsets
+#                       itself, so there is no per-build config to go stale.
+#   RDP Wrapper         reads the offsets from rdpwrap.ini, keyed by the exact termsrv.dll
+#                       build. The section below goes to real lengths to keep that ini
+#                       current -- including generating offsets with RDPWrapOffsetFinder for
+#                       builds nobody has published yet -- but it remains a per-build
+#                       dependency, and a build it cannot solve leaves multi-session broken.
+#
+# MultiSeat detects either at runtime ("ServiceDll is not stock termsrv.dll"), so this is
+# purely an install-time choice.
+if ($MultiSessionPatch -eq 'TermWrap') {
+
+Write-Step "TermWrap (concurrent RDP sessions)"
+
+$twScript = Join-Path $ScriptDir "install-termwrap.ps1"
+if (-not (Test-Path $twScript)) {
+    Write-Skip "install-termwrap.ps1 not found next to this script"
+} else {
+    # Idempotent, and it verifies the end state itself -- safe on every prerequisites pass.
+    $twArgs = @{}
+    if ($SkipDownload) { $twArgs["SkipDownload"] = $true }
+    if ($SkipReboot)   { $twArgs["SkipReboot"]   = $true }
+
+    & $twScript @twArgs
+    if ($LASTEXITCODE -eq 0) {
+        Write-OK "TermWrap active and verified"
+        $Installed += "TermWrap"
+        $NeedsReboot = $true
+    } else {
+        Write-Host "  WARNING: install-termwrap.ps1 reported failures (exit $LASTEXITCODE)." -ForegroundColor Yellow
+        Write-Host "  See its check list above. For the RDP Wrapper path instead, re-run with" -ForegroundColor Yellow
+        Write-Host "  -MultiSessionPatch RdpWrapper." -ForegroundColor Yellow
+        $Skipped += "TermWrap (verification failed)"
+    }
+}
+
+} else {
+
 Write-Step "RDP Wrapper Library (concurrent RDP sessions)"
 
 # Helper: get the resolved path that TermService's ServiceDll registry value points to.
@@ -1098,6 +1141,8 @@ if ($existingDll) {
         Write-Skip "RDPWrap  --  get from https://github.com/stascorp/rdpwrap/releases"
     }
 }
+
+}  # end: multi-session patch choice
 
 # ----------------------------------------------------------------
 # 5. Apollo (vibesoftwarecoder fork — mic passthrough + latest Apollo HEAD)
