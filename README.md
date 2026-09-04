@@ -2,7 +2,7 @@
 
 **Multi-seat headless game streaming for Windows using Moonlight/Apollo.**
 
-MultiSeat lets you run multiple simultaneous Moonlight game-streaming sessions on a single Windows machine. Each "seat" gets its own isolated Windows user account, virtual display, virtual audio cable, and Apollo (Sunshine) streaming instance — all managed from a single web dashboard.
+MultiSeat lets you run multiple simultaneous Moonlight game-streaming sessions on a single Windows machine. Each "seat" gets its own isolated Windows user account, virtual display, per-session audio, and Apollo (Sunshine) streaming instance — all managed from a single web dashboard.
 
 > **Setting this up for real?** [**Multi-seat WoW streaming runbook**](docs/wow-multiseat-runbook.md) — a complete worked example (three tablets, one PC), written after the fact from a working install. Covers the TermWrap multi-session patch, the Apollo client permissions that silently break every seat after the first, and the failures that cost the most time to diagnose.
 
@@ -11,7 +11,7 @@ MultiSeat lets you run multiple simultaneous Moonlight game-streaming sessions o
 ## How It Works
 
 1. You create or link a Windows local account for each streaming seat.
-2. MultiSeat provisions a seat: launches a dedicated Apollo process in the account's RDP session, attaches a virtual display (SudoVDA), and routes a virtual audio cable (VB-CABLE) to it.
+2. MultiSeat provisions a seat: launches a dedicated Apollo process in the account's RDP session and attaches a virtual display (SudoVDA). Audio needs no devices — the RDP session owns its own audio endpoint and Apollo captures it in place.
 3. The Moonlight client connects to the seat's Apollo instance using the host's IP and the seat's assigned port.
 4. Each seat streams independently with isolated input, audio, and display.
 
@@ -177,7 +177,8 @@ Edit `appsettings.json` in `C:\Program Files\MultiSeat\` (restart the service af
 | `ApolloLogLevel` | `info` | Apollo's own log level per seat. `debug` is the only way to see why a seat refuses a pairing or a client. Values: `verbose`, `debug`, `info`, `warning`, `error`. |
 | `ApiPort` | `9550` | Dashboard port |
 | `ApiKey` | *(auto-generated)* | API key required to access the dashboard. Auto-generated on first start and saved to `C:\ProgramData\MultiSeat\api-key.txt`. Set a fixed value here to override. Set to `disabled` to turn off authentication entirely (only safe on a fully trusted private network). |
-| `VacCableCount` | `4` | Number of installed VB-CABLE devices |
+| `AudioMode` | `PerSession` | How seat audio reaches Moonlight. `PerSession`: the seat's RDP session keeps its own audio endpoint and Apollo loopback-captures it — no virtual cables, no seat-count cap, host audio untouched. **Requires "Play audio on host PC" ON in the Moonlight client**, and has no microphone path. `SharedHost`: seats render onto the host's audio subsystem through per-seat virtual cables; mic works, cables required. |
+| `VacCableCount` | `4` | Number of installed VB-CABLE devices. **Only used when `AudioMode = SharedHost`** — `PerSession` needs none. |
 | `EnableKeyboardMouseIsolation` | `false` | Keyboard/mouse session isolation (no-op as architected — see Known Constraints in CLAUDE.md) |
 | `EnableSharedGameLibrary` | `true` | Create a shared games/ROMs folder all seats can use |
 | `SharedGameLibraryDir` | `C:\MultiSeatGames` | Root of the shared library (`\SteamLibrary` + `\ROMs`) |
@@ -257,7 +258,7 @@ MultiSeatService (Windows Service, SYSTEM)
 ├── SessionLauncher       — RDP session + mstsc window management
 ├── ApolloManager         — per-seat Apollo process management
 ├── VirtualDisplayManager — SudoVDA display attach/detach
-├── AudioRouter           — VB-CABLE assignment per seat
+├── AudioRouter           — VB-CABLE assignment (SharedHost audio only)
 ├── InputRouter           — XInput/ViGEm controller routing
 ├── HidHideConfigurator   — controller cloaking
 ├── InputHookManager      — keyboard/mouse session isolation
@@ -326,8 +327,11 @@ Or sidestep the ini entirely with **TermWrap**, which disassembles `termsrv.dll`
 
 It is idempotent and verifies the end state — ServiceDll, both DLLs, TermService, a listener on 3389, and three registry values — before reporting success. Two of those values are **not** in TermWrap's own documentation and leave RDP broken if wrong: `fDenyTSConnections` (Remote Desktop off entirely; RDP Wrapper's uninstaller sets it, so it bites exactly when migrating) and `fSingleSessionPerUser` (RDP listens, but mstsc reconnects the existing session instead of creating one). The script asserts both.
 
-**Multiple VB-CABLE devices needed**
-Each seat requires one VB-CABLE. After installing the first one via the prerequisites script, run `VBCABLE_Setup_x64.exe` manually for each additional seat (found in the extracted `VBCABLE_Driver_Pack45.zip`).
+**No sound in a seat**
+Turn **"Play audio on host PC" ON** in the Moonlight client. Under the default `PerSession` audio mode this is required, and it is the opposite of what `SharedHost` needed — the "host" of a redirected session is the seat's own session. Seats have no microphone in this mode; switch that seat to `SharedHost` if you need one.
+
+**Multiple VB-CABLE devices needed — `SharedHost` audio only**
+Not applicable under the default `PerSession` mode, which uses no virtual cables. If you have deliberately set `AudioMode = SharedHost`, each seat requires one VB-CABLE: after installing the first via the prerequisites script, run `VBCABLE_Setup_x64.exe` manually for each additional seat (found in the extracted `VBCABLE_Driver_Pack45.zip`).
 
 ---
 
