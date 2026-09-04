@@ -137,15 +137,12 @@ Restart-Service MultiSeatService
 
 Create one Windows local account per kid, then one seat per account in the dashboard at `http://localhost:9550`. The API key is at `C:\ProgramData\MultiSeat\api-key.txt`.
 
-Each seat reserves a **30-port block** from `PortBase` — so the bases are 30 apart, not 10. Each seat's Apollo web UI is its base port **+1**:
+**Ports are assigned automatically — don''t compute them.** MultiSeat allocates each seat a 30-port block and the dashboard shows you everything you need: each seat card displays its **Port** (that is the address you give Moonlight) and links directly to that seat''s **Apollo web UI**. Use those.
 
-| Seat | Base | Apollo web UI | Moonlight target |
-|---|---|---|---|
-| 1 | 48100 | `https://<host>:48101` | `<host-ip>:48100` |
-| 2 | 48130 | `https://<host>:48131` | `<host-ip>:48130` |
-| 3 | 48160 | `https://<host>:48161` | `<host-ip>:48160` |
+Two things worth knowing anyway, because they explain what you are looking at:
 
-Seats are assigned bases in provisioning order, not creation-name order — check the dashboard, or the `port =` line in each seat's `sunshine.conf`, rather than assuming which kid got which block.
+- Blocks are **30 apart**, not 10 — so three seats land on 48100, 48130, 48160 rather than 48100/48110/48120.
+- Bases are handed out in **provisioning order, not name order**. On this host the second child created got 48100. Never assume which kid owns which block.
 
 Set each seat's resolution to the tablet's native size when you create it. Seats get exactly that geometry rather than inheriting the console's 5120x1440, and Apollo follows the resolution the Moonlight client asks for on connect.
 
@@ -161,7 +158,7 @@ Set each seat's resolution to the tablet's native size when you create it. Seats
 |---|---|
 | **Symptom** | The tablet pairs fine. It connects fine. It sees the app list. Then launching anything returns **403**, and there is no working mouse or keyboard. |
 | **Cause** | Apollo grants the **first** client paired to an instance all permissions. Every client paired after that gets only *View Streams* and *List Apps*. |
-| **Fix** | In that seat's Apollo web UI → **Clients** tab, grant the permissions below to every client that wasn't first. Applies immediately, no restart. |
+| **Fix** | Open that seat's Apollo web UI — the dashboard seat card links straight to it — then **Clients** tab, and grant the permissions below to every client that wasn't first. Applies immediately, no restart. |
 
 Grant each non-first client **all** of these:
 
@@ -266,8 +263,14 @@ Get-Process sunshine | Select-Object Id, Path
 # Apollo's own service stays off
 Get-Service ApolloService | Select-Object Status, StartType
 
-# One listening port per seat
-netstat -ano | findstr LISTENING | findstr "48100 48130 48160"
+# One listening port per seat - reads each seat's real port, so it cannot go stale
+Get-ChildItem "C:\ProgramData\MultiSeat\apollo\*\sunshine.conf" | ForEach-Object {
+    $m = Select-String -Path $_.FullName -Pattern '^port = (\d+)'
+    $port = [int]$m.Matches[0].Groups[1].Value
+    $up = Get-NetTCPConnection -LocalPort $port -State Listen -EA SilentlyContinue
+    "{0,-12} base {1}  webui {2}  {3}" -f $_.Directory.Name, $port, ($port + 1),
+        $(if ($up) { "LISTENING" } else { "NOT LISTENING" })
+}
 
 # RDP up, multi-session allowed, TermWrap loaded
 Get-Service TermService | Select-Object Status, StartType
