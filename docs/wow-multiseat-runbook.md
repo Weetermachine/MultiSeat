@@ -91,16 +91,25 @@ Reboot after it completes. Rollback is `reg import "C:\Program Files\RDP Wrapper
 
 ## 3. Apollo
 
-Install `ClassicOldSong/Apollo` v0.4.6 or newer — earlier versions ship a SudoVDA driver whose code signature expired in August 2025. Then immediately disable its own service:
+**On a clean machine there is nothing to do here — skip to step 4.**
+
+`install-prerequisites.ps1` already installed **ApolloVibe** (the `vibesoftwarecoder` fork) to `C:\Program Files\ApolloVibe\`, which is exactly where the default `ApolloExePath` points. MultiSeat deliberately ships its own Apollo on its own port block so it never touches a standalone Apollo you might run for your own desktop.
+
+The rest of this step applies **only if you already have a separate, standalone Apollo installed** — as the host this was written on did. If you do not, following it will install a second Apollo and override a working default for no reason.
+
+<details>
+<summary><b>Only if you have a standalone Apollo as well</b></summary>
+
+Use `ClassicOldSong/Apollo` v0.4.6 or newer — earlier versions ship a SudoVDA driver whose code signature expired in August 2025.
+
+**Disable its service.** A standalone Apollo registers `ApolloService`, which auto-starts a second `sunshine.exe` that fights MultiSeat's instances (see [Things that cost hours](#things-that-cost-hours)). MultiSeat deliberately leaves this service alone, so you must turn it off yourself:
 
 ```powershell
 Stop-Service ApolloService -Force
 Set-Service ApolloService -StartupType Disabled
 ```
 
-This matters enormously — see [Things that cost hours](#things-that-cost-hours). Only MultiSeat should be starting Apollo.
-
-Then point MultiSeat at it. Put the override in `appsettings.local.json`, **not** `appsettings.json`:
+**Only if you want MultiSeat to use that Apollo rather than ApolloVibe**, override the path. Put it in `appsettings.local.json`, **not** `appsettings.json`:
 
 ```jsonc
 // C:\Program Files\MultiSeat\appsettings.local.json
@@ -120,19 +129,23 @@ Get-Content "C:\Program Files\MultiSeat\appsettings.local.json" -Raw | ConvertFr
 Restart-Service MultiSeatService
 ```
 
-> **Don't substitute Vibepollo.** MultiSeat parses Apollo's log for a display whose `friendly_name` contains VDD, SudoVDA or SudoMaker. Nonary's Vibepollo fork reports differently and the parse never matches.
+</details>
+
+> **ApolloVibe and Vibepollo are different things, and the names are nearly identical.** **ApolloVibe** (`vibesoftwarecoder/Apollo`) is what the prerequisites script installs and what MultiSeat expects — that one is correct. **Vibepollo** (Nonary's fork) is not: MultiSeat parses Apollo's log for a display whose `friendly_name` contains VDD, SudoVDA or SudoMaker, and Vibepollo's driver reports differently, so the parse never matches and `output_name` never resolves. Do not substitute it.
 
 ## 4. Seats
 
 Create one Windows local account per kid, then one seat per account in the dashboard at `http://localhost:9550`. The API key is at `C:\ProgramData\MultiSeat\api-key.txt`.
 
-Seats take sequential port blocks from `PortBase`. Each seat's Apollo web UI is its base port **+1**:
+Each seat reserves a **30-port block** from `PortBase` — so the bases are 30 apart, not 10. Each seat's Apollo web UI is its base port **+1**:
 
 | Seat | Base | Apollo web UI | Moonlight target |
 |---|---|---|---|
 | 1 | 48100 | `https://<host>:48101` | `<host-ip>:48100` |
-| 2 | 48110 | `https://<host>:48111` | `<host-ip>:48110` |
-| 3 | 48120 | `https://<host>:48121` | `<host-ip>:48120` |
+| 2 | 48130 | `https://<host>:48131` | `<host-ip>:48130` |
+| 3 | 48160 | `https://<host>:48161` | `<host-ip>:48160` |
+
+Seats are assigned bases in provisioning order, not creation-name order — check the dashboard, or the `port =` line in each seat's `sunshine.conf`, rather than assuming which kid got which block.
 
 Set each seat's resolution to the tablet's native size when you create it. Seats get exactly that geometry rather than inheriting the console's 5120x1440, and Apollo follows the resolution the Moonlight client asks for on connect.
 
@@ -166,7 +179,7 @@ Permissions are per Apollo instance, so a seat that works proves nothing about t
 
 ## 6. WoW client per seat
 
-Give each seat its own copy of the game. Separate `WTF` folders mean separate resolution, keybinds and UI settings, which you want.
+Give each seat its own copy of the game. Separate `WTF` folders mean separate resolution, keybinds and UI settings, which you want. Any path on any drive works — `D:` below is just where this host put them:
 
 ```
 D:\WorldOfWarcraftClients\<Name> Client\
@@ -196,7 +209,7 @@ Standard Moonlight from the Play Store or App Store. (MoonlightVibe is a Windows
 
 *Presents as: streams silently capturing the host's physical monitor.*
 
-Apollo installs `ApolloService`, which auto-starts and spawns a second `sunshine.exe` via `sunshinesvc.exe`. That second instance holds an open handle on `ROOT\DISPLAY\0001`, so when MultiSeat's instance tries to restart the display adapter, Windows vetoes it. The tell is Kernel-PnP Event 225 naming `sunshine.exe` as the blocking process, plus SetupAPI `error=13`.
+This only happens if you installed a **standalone** Apollo alongside ApolloVibe — a clean prerequisites-only install registers no such service. A standalone Apollo installs `ApolloService`, which auto-starts and spawns a second `sunshine.exe` via `sunshinesvc.exe`. That second instance holds an open handle on `ROOT\DISPLAY\0001`, so when MultiSeat's instance tries to restart the display adapter, Windows vetoes it. The tell is Kernel-PnP Event 225 naming `sunshine.exe` as the blocking process, plus SetupAPI `error=13`.
 
 ```powershell
 Get-Process sunshine | Select-Object Id, Path, StartTime
@@ -254,7 +267,7 @@ Get-Process sunshine | Select-Object Id, Path
 Get-Service ApolloService | Select-Object Status, StartType
 
 # One listening port per seat
-netstat -ano | findstr LISTENING | findstr "48100 48110 48120"
+netstat -ano | findstr LISTENING | findstr "48100 48130 48160"
 
 # RDP up, multi-session allowed, TermWrap loaded
 Get-Service TermService | Select-Object Status, StartType

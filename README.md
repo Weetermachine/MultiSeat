@@ -39,14 +39,13 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the full hardware and software requir
 - HidHide (controller isolation)
 - ViGEmBus (virtual controller driver)
 - A multi-session patch for Terminal Services — [TermWrap](https://github.com/llccd/TermWrap) (default) or RDPWrap
-- PowerShell 7+ (`winget install Microsoft.PowerShell`)
+- PowerShell 5.1 (built in) or 7+ — the installers run on either
 
 ---
 
 ## Installation
 
-> **All commands must be run as Administrator in PowerShell 7+.** Windows PowerShell 5 is not supported.
-> Install PowerShell 7 if needed: `winget install Microsoft.PowerShell`
+> **All commands must be run as Administrator.** Windows PowerShell 5.1 (built in) works; the prerequisites script deliberately re-launches itself under 5.1 on 64-bit Windows so driver installation sees the real `System32`. PowerShell 7 also works if you prefer it: `winget install Microsoft.PowerShell`
 
 ### Step 1 — Clone the repository
 
@@ -273,15 +272,18 @@ The service runs as SYSTEM. Each seat's Apollo process runs inside its own RDP s
 
 ## Port Layout
 
-Each seat reserves a block of 10 ports starting at `PortBase + (seat_index × 10)`:
+Each seat reserves a block of 30 ports starting at `PortBase + (seat_index × 30)` (`Constants.PortsPerSeat`). Eight offsets in that block are actually used:
 
 | Offset | Protocol | Use |
 |--------|----------|-----|
-| +0 | TCP | Apollo HTTPS (Moonlight pairing) |
-| +1 | TCP | Apollo HTTP |
-| +2 | TCP/UDP | RTP video |
-| +3 | TCP/UDP | RTP audio |
-| +4 | TCP/UDP | Control channel |
+| -5 | TCP | GFE HTTPS — Moonlight serverinfo / pair / launch |
+| +0 | TCP | GFE HTTP — same endpoints, plaintext fallback. **This is the port you give Moonlight.** |
+| +1 | TCP | Apollo web UI (HTTPS) |
+| +9 | UDP | RTP video |
+| +10 | UDP | ENet control |
+| +11 | UDP | RTP audio |
+| +12 | UDP | RTP mic |
+| +26 | TCP | RTSP session setup |
 
 Default `PortBase` = 48100 (each seat reserves a 30-port block). Seat 0 = 48100, Seat 1 = 48130, Seat 2 = 48160, etc. The base sits above a stock Apollo's port block so MultiSeat coexists with a standalone Apollo.
 
