@@ -135,9 +135,13 @@ Restart-Service MultiSeatService
 
 ## 4. Seats
 
-Create one Windows local account per kid, then one seat per account in the dashboard at `http://localhost:9550`. The API key is at `C:\ProgramData\MultiSeat\api-key.txt`.
+Open the dashboard at `http://localhost:9550` and paste the API key from `C:\ProgramData\MultiSeat\api-key.txt` when it asks (once per browser).
 
-**Ports are assigned automatically — don''t compute them.** MultiSeat allocates each seat a 30-port block and the dashboard shows you everything you need: each seat card displays its **Port** (that is the address you give Moonlight) and links directly to that seat''s **Apollo web UI**. Use those.
+1. **Accounts** tab — create one Windows local account per kid. Do this here, not in Windows Settings: MultiSeat stores the password it generates so it can open the seat's RDP session later.
+2. **Seats** tab — **+ New Seat**, pick the account, set resolution and FPS.
+3. Wait for the seat to reach **Ready** (~15 s). A seat stuck anywhere else is not usable yet; see the [verification checklist](#verification-checklist).
+
+**Ports are assigned automatically — don't compute them.** MultiSeat allocates each seat a 30-port block and the dashboard shows you everything you need: each seat card displays its **Port** (that is the address you give Moonlight) and links directly to that seat's **Apollo web UI**. Use those.
 
 Two things worth knowing anyway, because they explain what you are looking at:
 
@@ -146,11 +150,27 @@ Two things worth knowing anyway, because they explain what you are looking at:
 
 Set each seat's resolution to the tablet's native size when you create it. Seats get exactly that geometry rather than inheriting the console's 5120x1440, and Apollo follows the resolution the Moonlight client asks for on connect.
 
-> Seat accounts are **standard users** now, not local administrators (`GrantSeatAdministrator` is off by default). Anything a seat must write to has to grant access explicitly — which is what step 6 does for the game folders.
+> Seat accounts are **standard users** now, not local administrators (`GrantSeatAdministrator` is off by default). Anything a seat must write to has to grant access explicitly — which is what step 7 does for the game folders.
 
 ---
 
-## 5. Client permissions — the step everyone misses
+## 5. Connect the clients
+
+Do this **before** step 6 — a client has to be paired before there is anything to grant permissions to.
+
+Use standard Moonlight from the Play Store or App Store. (MoonlightVibe auto-discovers seats and saves the manual entry, but it is a Windows client — no use on a tablet.) On each tablet, add the host manually using the **Port** shown on that seat's dashboard card:
+
+```
+<host-ip>:<seat-port>
+```
+
+Point each tablet at its own seat, then pair with the PIN in that seat's Apollo web UI (the dashboard card links to it).
+
+> **One client setting is not optional:** turn **"Play audio on host PC" ON**. This is the opposite of the old virtual-cable setup, and it is safe because the "host" of a redirected session *is* the seat's own session. With it off, the seat has no sound.
+
+---
+
+## 6. Client permissions — the step everyone misses
 
 **Apollo gives the first paired client everything, and everyone after it almost nothing.** This is per seat, it is silent, it does not look like a permissions problem, and nothing in MultiSeat manages it for you.
 
@@ -174,7 +194,7 @@ Permissions are per Apollo instance, so a seat that works proves nothing about t
 
 ---
 
-## 6. WoW client per seat
+## 7. WoW client per seat
 
 Give each seat its own copy of the game. Separate `WTF` folders mean separate resolution, keybinds and UI settings, which you want. Any path on any drive works — `D:` below is just where this host put them:
 
@@ -191,14 +211,6 @@ icacls "D:\WorldOfWarcraftClients" /grant "Users:(OI)(CI)M" /T
 **Patch `Wow.exe` for RDP.** WoW 3.3.5a refuses to launch in a session it detects as remote, and every seat is an RDP session. [`Jnnshschl/WowRdpPatcher`](https://github.com/Jnnshschl/WowRdpPatcher) NOPs out that check. Patch one copy, verify it launches, then copy that exe to the others rather than re-running the patcher each time.
 
 Set each client's `realmlist.wtf` to your server, and register the exe as an app in that seat's Apollo web UI (Applications tab) so it appears as its own tile in Moonlight rather than dropping the kid onto a bare desktop.
-
-## 7. Clients
-
-Standard Moonlight from the Play Store or App Store. (MoonlightVibe is a Windows client, not an Android one.) Add each PC manually as `<host-ip>:<seat-port>`, pointing each tablet at its own seat, and pair via PIN in that seat's Apollo web UI.
-
-> **One client setting is not optional:** turn **"Play audio on host PC" ON**. This is the opposite of the old virtual-cable setup, and it is safe because the "host" of a redirected session *is* the seat's own session. With it off, the seat has no sound.
-
----
 
 ## Things that cost hours
 
