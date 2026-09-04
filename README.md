@@ -4,6 +4,8 @@
 
 MultiSeat lets you run multiple simultaneous Moonlight game-streaming sessions on a single Windows machine. Each "seat" gets its own isolated Windows user account, virtual display, virtual audio cable, and Apollo (Sunshine) streaming instance — all managed from a single web dashboard.
 
+> **Setting this up for real?** [**Multi-seat WoW streaming runbook**](docs/wow-multiseat-runbook.md) — a complete worked example (three tablets, one PC), written after the fact from a working install. Covers the TermWrap multi-session patch, the Apollo client permissions that silently break every seat after the first, and the failures that cost the most time to diagnose.
+
 ---
 
 ## How It Works
